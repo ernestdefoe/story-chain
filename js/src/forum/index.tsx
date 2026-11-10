@@ -23,7 +23,18 @@ app.initializers.add('ernestdefoe/story-chain', () => {
   // String form: these components live in lazy chunks, and extending an imported copy patches one core never renders.
   extend('flarum/forum/components/IndexSidebar', 'navItems', function (items: ItemList<Mithril.Children>) {
     if (!app.forum.attribute('storyChainCanView') || !app.forum.attribute('storyChainNav')) return;
-    items.add('story-chain', LinkButton.component({ href: app.route('story-chain'), icon: 'fas fa-feather-pointed' }, t('nav')), 78);
+    items.add(
+      'story-chain',
+      LinkButton.component(
+        {
+          href: app.route('story-chain'),
+          icon: 'fas fa-feather-pointed',
+          active: String(app.current.get('routeName') || '').startsWith('story-chain'),
+        },
+        t('nav')
+      ),
+      78
+    );
   });
 
   extend('flarum/forum/components/IndexPage', 'contentItems', function (items: ItemList<Mithril.Children>) {
