@@ -342,17 +342,29 @@ class StoryTest extends TestCase
     }
 
     #[Test]
-    public function index_names_fit_every_database(): void
+    public function generated_index_and_key_names_fit_mysql_with_a_nine_character_prefix(): void
     {
         $db = $this->app()->getContainer()->make(ConnectionInterface::class);
         $prefix = $db->getTablePrefix();
+        $schema = $db->getSchemaBuilder();
+        $names = [];
         foreach (['story_chain_stories', 'story_chain_lines', 'story_chain_candidates', 'story_chain_votes'] as $table) {
-            foreach ($db->getSchemaBuilder()->getIndexes($table) as $index) {
-                $this->assertLessThanOrEqual(64, strlen($index['name']), $index['name']);
+            foreach ($schema->getIndexes($table) as $index) {
+                if ($index['primary'] ?? false) {
+                    continue;
+                }
+                // Laravel's name with this test's prefix swapped for a nine-character one.
+                $names[] = '123456789'.substr($index['name'], strlen($prefix));
+                // Never a hand-made name: those aren't prefixed, so two forums in one database would collide.
+                $this->assertStringStartsWith($prefix.$table.'_', $index['name']);
             }
-            foreach ($db->getSchemaBuilder()->getForeignKeys($table) as $key) {
-                $this->assertLessThanOrEqual(64, strlen((string) $key['name']) + strlen($prefix), (string) $key['name']);
+            foreach ($schema->getForeignKeys($table) as $key) {
+                $names[] = '123456789'.$table.'_'.implode('_', $key['columns']).'_foreign';
             }
+        }
+        $this->assertNotEmpty($names);
+        foreach ($names as $name) {
+            $this->assertLessThanOrEqual(64, strlen($name), $name);
         }
     }
 
@@ -379,10 +391,69 @@ class StoryTest extends TestCase
 
         $lines = Line::query()->where('story_id', $id)->orderBy('position')->get();
         $this->assertNotNull($lines[1]->hidden_at);
+        $this->assertSame('', $lines[1]->body);
+        $this->assertSame('Line by 3.', $lines[2]->body);
+        // An erased line can't be put back by a moderator.
+        [$status, $body] = $this->api('POST', '/lines/'.$lines[1]->id, 1, ['hidden' => false]);
+        $this->assertSame([409, 'line_erased'], [$status, $body['errors'][0]['code']]);
         $this->assertNull($lines[1]->user_id);
         $this->assertNull($lines[2]->hidden_at);
         $this->assertNull($lines[2]->user_id);
         $this->assertSame([2, 1], [Story::query()->find($id)->line_count, Story::query()->find($id)->contributor_count]);
         $this->assertSame(0, Candidate::query()->whereIn('user_id', [2, 3])->count());
+    }
+
+    #[Test]
+    public function a_moderator_finishing_a_story_tells_everyone_taking_part_the_starter_included(): void
+    {
+        $id = $this->start();
+        $a = $this->offer($id, 2, 'Never added.');
+        $this->vote($id, 3, $a);
+
+        $this->assertSame(200, $this->api('PATCH', "/$id", 1, ['action' => 'finish'])[0]);
+
+        $this->assertSame('finished', Story::query()->find($id)->status);
+        $this->assertSame(0, Notification::query()->where('type', 'storyChainWon')->count());
+        $told = Notification::query()->where('type', 'storyChainRound')->orderBy('user_id')->get();
+        $this->assertSame([1, 2, 3], $told->pluck('user_id')->all());
+        $this->assertTrue($told->every(fn ($n) => $n->from_user_id === null && $n->subject_id === $n->user_id));
+        $this->assertTrue((bool) json_decode(json_encode($told->first()->data), true)['finished']);
+
+        // They show in the recipient's list (core hides notifications whose subject is missing).
+        $response = $this->send($this->request('GET', '/api/notifications', ['authenticatedAs' => 3]));
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertStringContainsString('storyChainRound', (string) $response->getBody());
+    }
+
+    #[Test]
+    public function deleting_an_account_recounts_the_stories_they_wrote_in(): void
+    {
+        $id = $this->start(['maxLines' => 3]);
+        foreach ([3 => 'A middle line.', 2 => 'The last line.'] as $writer => $text) {
+            $this->offer($id, $writer, $text);
+            $this->runOut($id);
+            $this->closer()->close($id);
+        }
+        $this->assertSame(['finished', 3], [Story::query()->find($id)->status, Story::query()->find($id)->contributor_count]);
+
+        $this->assertSame(204, $this->send($this->request('DELETE', '/api/users/2', ['authenticatedAs' => 1]))->getStatusCode());
+
+        $story = Story::query()->find($id);
+        $this->assertSame([2, 3], [$story->contributor_count, $story->line_count]);
+        $this->assertSame('The last line.', Line::query()->where('story_id', $id)->orderByDesc('position')->value('body'));
+    }
+
+    #[Test]
+    public function the_list_counts_only_the_open_rounds_lines(): void
+    {
+        $id = $this->start();
+        $this->offer($id, 2, 'Round one.');
+        $this->offer($id, 3, 'Also round one.');
+        $this->runOut($id);
+        $this->closer()->close($id);
+        $this->offer($id, 4, 'Round two.');
+
+        [, $body] = $this->api('GET', '', 5);
+        $this->assertSame(1, $body['active'][0]['offered']);
     }
 }

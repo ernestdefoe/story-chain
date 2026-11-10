@@ -18,7 +18,9 @@ class Vote extends AbstractModel
     protected $table = 'story_chain_votes';
 
     protected $casts = [
+        'user_id' => 'integer',
         'round' => 'integer',
+        'candidate_id' => 'integer',
         'created_at' => 'datetime',
     ];
 }

@@ -12,10 +12,10 @@ return Migration::createTable('story_chain_votes', function (Blueprint $table) {
     $table->unsignedInteger('user_id');
     $table->dateTime('created_at');
 
-    $table->unique(['story_id', 'round', 'user_id'], 'sc_votes_story_round_user');
-    $table->index('candidate_id', 'sc_votes_candidate');
-    $table->index('user_id', 'sc_votes_user');
-    $table->foreign('story_id', 'sc_votes_story_fk')->references('id')->on('story_chain_stories')->cascadeOnDelete();
-    $table->foreign('candidate_id', 'sc_votes_candidate_fk')->references('id')->on('story_chain_candidates')->cascadeOnDelete();
-    $table->foreign('user_id', 'sc_votes_user_fk')->references('id')->on('users')->cascadeOnDelete();
+    $table->unique(['story_id', 'round', 'user_id']);
+    $table->index('candidate_id');
+    $table->index('user_id');
+    $table->foreign('story_id')->references('id')->on('story_chain_stories')->cascadeOnDelete();
+    $table->foreign('candidate_id')->references('id')->on('story_chain_candidates')->cascadeOnDelete();
+    $table->foreign('user_id')->references('id')->on('users')->cascadeOnDelete();
 });

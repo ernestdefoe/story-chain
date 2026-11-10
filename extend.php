@@ -18,6 +18,7 @@
 use ErnestDefoe\StoryChain\Api;
 use ErnestDefoe\StoryChain\CardCache;
 use ErnestDefoe\StoryChain\Console\CloseCommand;
+use ErnestDefoe\StoryChain\Forget;
 use ErnestDefoe\StoryChain\Gdpr\StoryChainData;
 use ErnestDefoe\StoryChain\Http\PageContent;
 use ErnestDefoe\StoryChain\Notification\LineWonBlueprint;
@@ -29,6 +30,7 @@ use Flarum\Api\Schema;
 use Flarum\Extend;
 use Flarum\Gdpr\Extend\UserData;
 use Flarum\Settings\SettingsRepositoryInterface;
+use Flarum\User\Event\Deleting;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 
 return [
@@ -87,6 +89,10 @@ return [
         ->default(Settings::SHOW_AUTHORS, false)
         ->default(Settings::NO_REPEAT, true)
         ->serializeToForum('storyChainNav', Settings::NAV, 'boolval'),
+
+    // Before the user row goes: recount the stories they wrote in (the foreign keys would only null their name).
+    (new Extend\Event())
+        ->listen(Deleting::class, fn (Deleting $event) => Forget::user($event->user, false)),
 
     (new Extend\Conditional())
         ->whenExtensionEnabled('flarum-gdpr', fn () => [

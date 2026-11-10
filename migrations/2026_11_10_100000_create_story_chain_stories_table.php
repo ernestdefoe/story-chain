@@ -32,8 +32,7 @@ return Migration::createTable('story_chain_stories', function (Blueprint $table)
     $table->dateTime('created_at');
     $table->dateTime('updated_at')->nullable();
 
-    // Short explicit names: prefixed index names must stay under 64 characters.
-    $table->index(['status', 'round_ends_at'], 'sc_stories_status_ends');
-    $table->index('user_id', 'sc_stories_user');
-    $table->foreign('user_id', 'sc_stories_user_fk')->references('id')->on('users')->nullOnDelete();
+    $table->index(['status', 'round_ends_at']);
+    $table->index('user_id');
+    $table->foreign('user_id')->references('id')->on('users')->nullOnDelete();
 });

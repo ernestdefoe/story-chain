@@ -2,19 +2,17 @@
 
 namespace ErnestDefoe\StoryChain\Gdpr;
 
-use Carbon\Carbon;
 use ErnestDefoe\StoryChain\Candidate;
-use ErnestDefoe\StoryChain\Closer;
+use ErnestDefoe\StoryChain\Forget;
 use ErnestDefoe\StoryChain\Line;
-use ErnestDefoe\StoryChain\Story;
 use ErnestDefoe\StoryChain\Vote;
 use Flarum\Gdpr\Data\Type;
 
 /**
  * A member's export: the lines of theirs in stories, the lines they offered
  * and their votes. Anonymizing keeps their lines in the stories without a
- * name; erasing also takes their lines out of the stories. Offered lines and
- * votes go either way.
+ * name; erasing also blanks their lines and takes them out of the stories for
+ * good (Forget). Offered lines and votes go either way.
  */
 class StoryChainData extends Type
 {
@@ -56,21 +54,6 @@ class StoryChainData extends Type
 
     private function forget(bool $erase): void
     {
-        $stories = Line::query()->where('user_id', $this->user->id)->distinct()->pluck('story_id');
-
-        Vote::query()->where('user_id', $this->user->id)->delete();
-        Candidate::query()->where('user_id', $this->user->id)->delete();
-        if ($erase) {
-            Line::query()->where('user_id', $this->user->id)->whereNull('hidden_at')->update(['hidden_at' => Carbon::now()]);
-        }
-        Line::query()->where('user_id', $this->user->id)->update(['user_id' => null]);
-        Story::query()->where('user_id', $this->user->id)->update(['user_id' => null]);
-
-        foreach ($stories as $id) {
-            Story::query()->where('id', $id)->update([
-                'line_count' => Line::query()->where('story_id', $id)->shown()->count(),
-                'contributor_count' => Closer::contributors((int) $id),
-            ]);
-        }
+        Forget::user($this->user, $erase);
     }
 }

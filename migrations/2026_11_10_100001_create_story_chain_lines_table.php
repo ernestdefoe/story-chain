@@ -22,9 +22,9 @@ return Migration::createTable('story_chain_lines', function (Blueprint $table) {
     $table->dateTime('hidden_at')->nullable();
     $table->unsignedInteger('hidden_by')->nullable();
 
-    $table->unique(['story_id', 'round'], 'sc_lines_story_round');
-    $table->index(['story_id', 'position'], 'sc_lines_story_pos');
-    $table->index('user_id', 'sc_lines_user');
-    $table->foreign('story_id', 'sc_lines_story_fk')->references('id')->on('story_chain_stories')->cascadeOnDelete();
-    $table->foreign('user_id', 'sc_lines_user_fk')->references('id')->on('users')->nullOnDelete();
+    $table->unique(['story_id', 'round']);
+    $table->index(['story_id', 'position']);
+    $table->index('user_id');
+    $table->foreign('story_id')->references('id')->on('story_chain_stories')->cascadeOnDelete();
+    $table->foreign('user_id')->references('id')->on('users')->nullOnDelete();
 });

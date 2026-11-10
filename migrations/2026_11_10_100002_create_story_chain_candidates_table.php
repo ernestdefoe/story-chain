@@ -18,8 +18,8 @@ return Migration::createTable('story_chain_candidates', function (Blueprint $tab
     $table->dateTime('hidden_at')->nullable();
     $table->unsignedInteger('hidden_by')->nullable();
 
-    $table->unique(['story_id', 'round', 'user_id'], 'sc_cands_story_round_user');
-    $table->index('user_id', 'sc_cands_user');
-    $table->foreign('story_id', 'sc_cands_story_fk')->references('id')->on('story_chain_stories')->cascadeOnDelete();
-    $table->foreign('user_id', 'sc_cands_user_fk')->references('id')->on('users')->cascadeOnDelete();
+    $table->unique(['story_id', 'round', 'user_id']);
+    $table->index('user_id');
+    $table->foreign('story_id')->references('id')->on('story_chain_stories')->cascadeOnDelete();
+    $table->foreign('user_id')->references('id')->on('users')->cascadeOnDelete();
 });

@@ -51,18 +51,23 @@ class ListController implements RequestHandlerInterface
             $ids = $active->modelKeys();
 
             $newest = $ids ? Line::query()->whereIn('id', Line::query()->toBase()->whereIn('story_id', $ids)->whereNull('hidden_at')->groupBy('story_id')->selectRaw('max(id)'))->get()->keyBy('story_id') : collect();
-            $offered = $ids ? Candidate::query()->toBase()->whereIn('story_id', $ids)->whereNull('hidden_at')->groupBy('story_id', 'round')
-                ->selectRaw('story_id, round, count(*) as n')->get()->groupBy('story_id') : collect();
+            // The open round's lines only: a join on the story's own round.
+            $offered = $ids ? Candidate::query()->toBase()
+                ->join('story_chain_stories', 'story_chain_stories.id', '=', 'story_chain_candidates.story_id')
+                ->whereColumn('story_chain_candidates.round', 'story_chain_stories.round')
+                ->whereIn('story_chain_candidates.story_id', $ids)->whereNull('story_chain_candidates.hidden_at')
+                ->groupBy('story_chain_candidates.story_id')
+                ->select('story_chain_candidates.story_id')->selectRaw('count(*) as n')
+                ->pluck('n', 'story_id') : collect();
 
             $body['active'] = $active->map(function (Story $story) use ($newest, $offered, &$userIds) {
                 /** @var Line|null $last */
                 $last = $newest->get($story->id);
                 $userIds[] = $last?->user_id;
-                $count = $offered->get($story->id)?->firstWhere('round', $story->round);
 
                 return $this->present->story($story) + [
                     'last' => $last ? ['body' => $last->body, 'user' => $last->user_id] : null,
-                    'offered' => $count ? (int) $count->n : 0,
+                    'offered' => (int) $offered->get($story->id, 0),
                 ];
             })->values();
             $body['canStart'] = $actor->can(Settings::START);

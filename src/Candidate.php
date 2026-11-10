@@ -27,6 +27,7 @@ class Candidate extends AbstractModel
     protected $table = 'story_chain_candidates';
 
     protected $casts = [
+        'user_id' => 'integer',
         'round' => 'integer',
         'created_at' => 'datetime',
         'hidden_at' => 'datetime',

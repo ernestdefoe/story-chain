@@ -5,12 +5,14 @@ namespace ErnestDefoe\StoryChain\Api;
 use Carbon\Carbon;
 use ErnestDefoe\StoryChain\CardCache;
 use ErnestDefoe\StoryChain\Closer;
+use ErnestDefoe\StoryChain\Job\SendRoundNews;
 use ErnestDefoe\StoryChain\Line;
 use ErnestDefoe\StoryChain\Settings;
 use ErnestDefoe\StoryChain\Story;
 use ErnestDefoe\StoryChain\Text;
 use Flarum\Http\RequestUtil;
 use Flarum\User\User;
+use Illuminate\Contracts\Queue\Queue;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Str;
 use Laminas\Diactoros\Response\JsonResponse;
@@ -35,6 +37,7 @@ class SaveController implements RequestHandlerInterface
         private readonly Closer $closer,
         private readonly RateLimit $limits,
         private readonly CardCache $card,
+        private readonly Queue $queue,
     ) {
     }
 
@@ -115,7 +118,8 @@ class SaveController implements RequestHandlerInterface
             return $this->closer->close($story->id, true) ? new JsonResponse(['closed' => true]) : Errors::make(409, 'round_closed');
         }
 
-        return $this->db->transaction(function () use ($request, $input, $action) {
+        $finished = null;
+        $response = $this->db->transaction(function () use ($request, $input, $action, &$finished) {
             $story = Story::locked($this->id($request));
             if (! $story) {
                 return Errors::make(404, 'story_not_found');
@@ -134,12 +138,20 @@ class SaveController implements RequestHandlerInterface
                 $story->status = Story::FINISHED;
                 $story->finished_at = $now;
                 $story->round_ends_at = $now;
+                $finished = $story->round;
             }
 
             $story->save();
 
             return new JsonResponse(['id' => $story->id, 'slug' => $story->slug]);
         });
+
+        // Everyone taking part hears it finished, after the commit.
+        if ($finished !== null) {
+            $this->queue->push(new SendRoundNews($this->id($request), $finished, null, true));
+        }
+
+        return $response;
     }
 
     /**

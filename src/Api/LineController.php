@@ -45,6 +45,11 @@ class LineController implements RequestHandlerInterface
                 return Errors::make(404, 'story_not_found');
             }
 
+            if (! $hidden && $line->body === '') {
+                // Erased at its writer's request (GDPR): never back.
+                return Errors::make(409, 'line_erased');
+            }
+
             $line->hidden_at = $hidden ? Carbon::now() : null;
             $line->hidden_by = $hidden ? $actor->id : null;
             $line->save();

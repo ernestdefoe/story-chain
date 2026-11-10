@@ -28,6 +28,7 @@ class Line extends AbstractModel
     protected $table = 'story_chain_lines';
 
     protected $casts = [
+        'user_id' => 'integer',
         'position' => 'integer',
         'round' => 'integer',
         'votes' => 'integer',

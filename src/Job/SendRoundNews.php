@@ -20,7 +20,8 @@ use Flarum\User\User;
  * (or "the story is finished") to everyone who has taken part in the story:
  * offered a line, voted, or has a line in it. Runs on the queue, never in the
  * request that closed the round. Syncing is idempotent (one blueprint per
- * round), so a retried job sends nothing twice.
+ * person per round), so a retried job sends nothing twice. A story a moderator
+ * finished has no winning line: everyone taking part hears it finished.
  */
 class SendRoundNews extends AbstractJob
 {
@@ -38,13 +39,11 @@ class SendRoundNews extends AbstractJob
 
         /** @var Line|null $line */
         $line = $this->lineId ? Line::query()->with('user')->find($this->lineId) : null;
-        $winner = $line->user ?? $story->user;
-        if (! $winner) {
-            return;
-        }
+        // No stand-in: a story a moderator finished has no winner, and nobody is left out for it.
+        $winner = $line && $line->hidden_at === null ? $line->user : null;
 
-        if ($line?->user && $line->hidden_at === null) {
-            $notifications->sync(new LineWonBlueprint($story, $line->user, $this->round, $line->body, $this->finished), [$line->user]);
+        if ($winner && $line) {
+            $notifications->sync(new LineWonBlueprint($story, $winner, $this->round, $line->body, $this->finished), [$winner]);
         }
 
         $people = Candidate::query()->where('story_id', $story->id)->distinct()->pluck('user_id')
@@ -53,13 +52,18 @@ class SendRoundNews extends AbstractJob
             ->unique()->values()->all();
 
         $readers = $this->readerGroups();
-        $recipients = User::query()->whereIn('id', $people)->where('id', '!=', $winner->id)->with('groups')->get()
-            ->filter(fn (User $user) => $readers === true || $user->groups->pluck('id')->intersect($readers)->isNotEmpty())
-            ->values()->all();
+        $round = $this->finished ? $this->round : $this->round + 1;
 
-        if ($recipients) {
-            $notifications->sync(new RoundBlueprint($story, $winner, $this->finished ? $this->round : $this->round + 1, $this->finished), $recipients);
-        }
+        User::query()->whereIn('id', $people)->when($winner, fn ($q) => $q->where('id', '!=', $winner->id))->with('groups')
+            ->chunkById(200, function ($users) use ($notifications, $readers, $story, $winner, $round) {
+                foreach ($users as $user) {
+                    /** @var User $user */
+                    if ($readers === true || $user->groups->pluck('id')->intersect($readers)->isNotEmpty()) {
+                        // One blueprint per person (they are its subject): syncing one never touches another's.
+                        $notifications->sync(new RoundBlueprint($story, $user, $winner, $round, $this->finished), [$user]);
+                    }
+                }
+            });
     }
 
     /**

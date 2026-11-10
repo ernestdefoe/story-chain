@@ -11,12 +11,15 @@ use Flarum\User\User;
 /**
  * To everyone taking part in a story when a round closes: "Mara's line was
  * added to The Lighthouse Keeper. Round 13 is open." or, at the end, "The
- * Lighthouse Keeper is finished". The subject is the winner (a User); the
- * round in the data makes it one alert per round.
+ * Lighthouse Keeper is finished" (a moderator may finish it with no line).
+ * The subject is the recipient (a User: core hides notifications whose
+ * subject is missing, and a subject without an API resource 500s every
+ * list); the winner, when there is one, is the sender. The round in the data
+ * makes it one alert per person per round, so a retried job sends nothing twice.
  */
 class RoundBlueprint implements BlueprintInterface, AlertableInterface
 {
-    public function __construct(public Story $story, public User $winner, public int $round, public bool $finished)
+    public function __construct(public Story $story, public User $recipient, public ?User $winner, public int $round, public bool $finished)
     {
     }
 
@@ -27,7 +30,7 @@ class RoundBlueprint implements BlueprintInterface, AlertableInterface
 
     public function getSubject(): ?AbstractModel
     {
-        return $this->winner;
+        return $this->recipient;
     }
 
     public function getData(): mixed
