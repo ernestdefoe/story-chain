@@ -187,6 +187,7 @@ html:not(#x-hi) .StoryChainPerson {
   -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  flex-shrink: 0;
   font-family: @sc-serif;
   font-size: 17px;
   font-weight: 700;
@@ -213,12 +214,13 @@ html:not(#x-hi) .StoryChainPerson {
   .StoryChainBook-kicker {
     font-size: 6px;
   }
+  // Three lines and no ornament: iOS's Iowan Old Style runs wider than other serifs.
   .StoryChainBook-title {
-    -webkit-line-clamp: 4;
+    -webkit-line-clamp: 3;
     font-size: 10px;
   }
   .StoryChainBook-rule {
-    font-size: 9px;
+    display: none;
   }
 }
 
@@ -521,6 +523,10 @@ html:not(#x-hi) .StoryChainActive-title {
   .StoryChainShelf {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 20px 16px;
+  }
+  .StoryChainShelf .StoryChainBook-title {
+    -webkit-line-clamp: 4;
+    font-size: 15px;
   }
 }
 
