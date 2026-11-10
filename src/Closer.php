@@ -82,7 +82,11 @@ class Closer
         return true;
     }
 
-    /** @return array{round: int, line: int|null, finished: bool}|null */
+    /**
+     * A moderator's early close gives the next round its full length from now.
+     *
+     * @return array{round: int, line: int|null, finished: bool}|null
+     */
     private function closeLocked(int $storyId, bool $now): ?array
     {
         $story = Story::locked($storyId);
@@ -128,7 +132,7 @@ class Closer
         if ($finished) {
             $changes += ['status' => Story::FINISHED, 'finished_at' => $at, 'round_ends_at' => $at];
         } else {
-            $changes['round_ends_at'] = self::nextClose($story, $at);
+            $changes['round_ends_at'] = $now ? $at->copy()->addHours($story->round_hours) : self::nextClose($story, $at);
         }
 
         // Only the closer that still sees this round open moves the story on.

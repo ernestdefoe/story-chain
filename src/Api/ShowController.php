@@ -122,7 +122,7 @@ class ShowController implements RequestHandlerInterface
 
         $candidates = $visible->map(function (Candidate $c) use ($actor, $authors, $live, &$userIds) {
             $mine = $c->user_id === $actor->id;
-            $row = ['id' => $c->id, 'body' => $c->body, 'mine' => $mine, 'at' => $c->created_at->toIso8601String()];
+            $row = ['id' => $c->id, 'body' => $c->body, 'mine' => $mine];
             if ($authors || $mine) {
                 $row['user'] = $c->user_id;
                 $userIds[] = $c->user_id;

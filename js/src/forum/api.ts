@@ -54,7 +54,6 @@ export interface Candidate {
   id: number;
   body: string;
   mine: boolean;
-  at: string;
   /** Only when the forum shows writers during a round, to moderators, or your own. */
   user?: number;
   /** Only when votes are counted live. */
