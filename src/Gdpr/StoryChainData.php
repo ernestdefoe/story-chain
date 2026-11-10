@@ -2,6 +2,7 @@
 
 namespace ErnestDefoe\StoryChain\Gdpr;
 
+use Carbon\Carbon;
 use ErnestDefoe\StoryChain\Candidate;
 use ErnestDefoe\StoryChain\Closer;
 use ErnestDefoe\StoryChain\Line;
@@ -60,7 +61,7 @@ class StoryChainData extends Type
         Vote::query()->where('user_id', $this->user->id)->delete();
         Candidate::query()->where('user_id', $this->user->id)->delete();
         if ($erase) {
-            Line::query()->where('user_id', $this->user->id)->whereNull('hidden_at')->update(['hidden_at' => now()]);
+            Line::query()->where('user_id', $this->user->id)->whereNull('hidden_at')->update(['hidden_at' => Carbon::now()]);
         }
         Line::query()->where('user_id', $this->user->id)->update(['user_id' => null]);
         Story::query()->where('user_id', $this->user->id)->update(['user_id' => null]);

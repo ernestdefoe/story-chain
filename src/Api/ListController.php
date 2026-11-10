@@ -58,7 +58,7 @@ class ListController implements RequestHandlerInterface
                 /** @var Line|null $last */
                 $last = $newest->get($story->id);
                 $userIds[] = $last?->user_id;
-                $count = collect($offered->get($story->id, []))->firstWhere('round', $story->round);
+                $count = $offered->get($story->id)?->firstWhere('round', $story->round);
 
                 return $this->present->story($story) + [
                     'last' => $last ? ['body' => $last->body, 'user' => $last->user_id] : null,

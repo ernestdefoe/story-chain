@@ -38,7 +38,7 @@ class SendRoundNews extends AbstractJob
 
         /** @var Line|null $line */
         $line = $this->lineId ? Line::query()->with('user')->find($this->lineId) : null;
-        $winner = $line?->user ?? $story->user;
+        $winner = $line->user ?? $story->user;
         if (! $winner) {
             return;
         }
