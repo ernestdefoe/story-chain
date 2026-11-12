@@ -456,4 +456,85 @@ class StoryTest extends TestCase
         [, $body] = $this->api('GET', '', 5);
         $this->assertSame(1, $body['active'][0]['offered']);
     }
+
+    #[Test]
+    public function a_member_starter_fixes_the_opening_line_until_the_first_round_closes(): void
+    {
+        $this->prepareDatabase(['group_permission' => [['permission' => Settings::START, 'group_id' => Group::MEMBER_ID]]]);
+        $this->app();
+        [, $body] = $this->api('POST', '', 2, ['title' => 'Typos', 'opening' => 'Teh lamp came on.']);
+        $id = $body['id'];
+        $opening = Line::query()->where('story_id', $id)->value('id');
+
+        // Nobody else, and nothing empty or too long.
+        $this->assertSame([403, 'line_locked'], $this->code('POST', "/lines/$opening", 3, ['body' => 'Mine now.']));
+        $this->assertSame([422, 'line_empty'], $this->code('POST', "/lines/$opening", 2, ['body' => ' ']));
+        $this->assertSame([422, 'line_too_long'], $this->code('POST', "/lines/$opening", 2, ['body' => str_repeat('a', 501)]));
+
+        // The opening line was never voted on, so its starter may rewrite it freely.
+        $this->assertSame(204, $this->api('POST', "/lines/$opening", 2, ['body' => "The lamp\n came on by itself, at noon."])[0]);
+        $this->assertSame('The lamp came on by itself, at noon.', Line::query()->find($opening)->body);
+
+        // A member can't use the moderators' Edit Story to do it.
+        $this->assertSame(403, $this->api('PATCH', "/$id", 2, ['opening' => 'Sneaky.'])[0]);
+
+        // Once the first round closes, it's settled.
+        $this->offer($id, 3, 'A gull landed on the rail.');
+        $this->runOut($id);
+        $this->closer()->close($id);
+        $this->assertSame([403, 'line_locked'], $this->code('POST', "/lines/$opening", 2, ['body' => 'The lamp came on.']));
+    }
+
+    #[Test]
+    public function a_winning_line_takes_a_typo_fix_from_its_writer_until_the_next_line_lands(): void
+    {
+        $id = $this->start();
+        $this->offer($id, 2, 'A gull landed on teh rail and looked at the lamp for a long time.');
+        $this->runOut($id);
+        $this->closer()->close($id);
+        $won = Line::query()->where('story_id', $id)->where('position', 2)->value('id');
+
+        // A typo, yes; a different line, no: it won with its own words.
+        $this->assertSame([422, 'edit_too_big'], $this->code('POST', "/lines/$won", 2, ['body' => 'Then the whole town went to sleep, every last one of them.']));
+        $this->assertSame(204, $this->api('POST', "/lines/$won", 2, ['body' => 'A gull landed on the rail and looked at the lamp for a long time.'])[0]);
+        $this->assertSame('A gull landed on the rail and looked at the lamp for a long time.', Line::query()->find($won)->body);
+
+        // The next line lands: the window closes.
+        $this->offer($id, 3, 'Then the fog came in.');
+        $this->runOut($id);
+        $this->closer()->close($id);
+        $this->assertSame([403, 'line_locked'], $this->code('POST', "/lines/$won", 2, ['body' => 'A gull landed on the rail.']));
+    }
+
+    #[Test]
+    public function moderators_fix_the_opening_line_in_edit_story_but_never_an_erased_one(): void
+    {
+        $id = $this->start();
+        $this->offer($id, 2, 'A gull landed on the rail.');
+        $this->runOut($id);
+        $this->closer()->close($id);
+
+        $this->assertSame(200, $this->api('PATCH', "/$id", 1, ['title' => 'The Lighthouse', 'opening' => 'The lamp came on by itself, twice.'])[0]);
+        $lines = Line::query()->where('story_id', $id)->orderBy('position')->get();
+        $this->assertSame(['The lamp came on by itself, twice.', 'A gull landed on the rail.'], $lines->pluck('body')->all());
+        $this->assertSame(1, $lines[0]->user_id);
+
+        // Unchanged text is no edit at all.
+        $this->assertSame(200, $this->api('PATCH', "/$id", 1, ['opening' => 'The lamp came on by itself, twice.'])[0]);
+
+        // Moderators may fix any line, even a whole rewrite of a won one.
+        $this->assertSame(204, $this->api('POST', '/lines/'.$lines[1]->id, 1, ['body' => 'A heron, not a gull, landed on the rail.'])[0]);
+
+        Line::query()->where('id', $lines[0]->id)->update(['body' => '', 'hidden_at' => Carbon::now()]);
+        $this->assertSame([409, 'line_erased'], $this->code('PATCH', "/$id", 1, ['opening' => 'Back again.']));
+        $this->assertSame([409, 'line_erased'], $this->code('POST', '/lines/'.$lines[0]->id, 1, ['body' => 'Back again.']));
+    }
+
+    /** @return array{int, string|null} */
+    private function code(string $method, string $path, int $as, array $body): array
+    {
+        [$status, $json] = $this->api($method, $path, $as, $body);
+
+        return [$status, $json['errors'][0]['code'] ?? null];
+    }
 }

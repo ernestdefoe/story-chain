@@ -11,7 +11,7 @@ import extractText from 'flarum/common/utils/extractText';
 import type Mithril from 'mithril';
 import { call, now, setSkew, span, t, type Candidate, type Detail, type Line, type Round } from '../api';
 import { Book, Person, date, pushUsers, useClock, user } from './parts';
-import { IndexSidebar, PageStructure, openStoryForm } from '../pages';
+import { IndexSidebar, PageStructure, openLineForm, openStoryForm } from '../pages';
 
 /** A steady hue per writer, for "Color by writer". */
 const hue = (id: number | null) => (id ? (id * 137) % 360 : 0);
@@ -169,7 +169,10 @@ export default class StoryPage extends Page {
         icon="fas fa-sliders"
         accessibleToggleLabel={extractText(t('manage.button'))}
       >
-        <Button icon="fas fa-pen" onclick={() => openStoryForm({ story, onsave: () => this.load() })}>
+        <Button
+          icon="fas fa-pen"
+          onclick={() => openStoryForm({ story, opening: this.data!.lines.find((line) => line.position === 1), onsave: () => this.load() })}
+        >
           {t('manage.edit')}
         </Button>
         {active && (
@@ -192,7 +195,7 @@ export default class StoryPage extends Page {
         )}
         <Button
           icon="fas fa-trash"
-          className="Button StoryChainManage-danger"
+          className="StoryChainManage-danger"
           onclick={() =>
             confirm(extractText(t('manage.confirm_delete', { title: story.title }))) &&
             call('DELETE', `/${story.id}`)
@@ -266,6 +269,15 @@ export default class StoryPage extends Page {
     return `${name}: ${line.round ? extractText(t('story.line_votes', { round: line.round, votes: line.votes })) : extractText(t('story.opening'))}`;
   }
 
+  /** Mirrors Line::rewrite: moderators any line; its writer while it's the newest line of a story still being written. */
+  canFix(line: Line): boolean {
+    const story = this.data!.story;
+    if (line.body === '') return false;
+    if (story.canModerate) return true;
+    const me = app.session.user;
+    return !!me && line.user === Number(me.id()) && story.status === 'active' && !line.hidden && line.round === story.round - 1;
+  }
+
   lineCard(line: Line): Mithril.Children {
     const story = this.data!.story;
     const focus = this.focus!;
@@ -279,6 +291,19 @@ export default class StoryPage extends Page {
         </div>
         <div className="StoryChainLineCard-when">{date(line.at)}</div>
         {line.hidden && <div className="StoryChainLineCard-hidden">{t('story.removed_line')}</div>}
+        {this.canFix(line) && (
+          <Button
+            className="Button Button--link StoryChainLineCard-mod"
+            icon="fas fa-pen"
+            onclick={() => {
+              this.focus = null;
+              this.pinned = false;
+              openLineForm({ line, story, onsave: () => this.load() });
+            }}
+          >
+            {t('manage.fix_line')}
+          </Button>
+        )}
         {story.canModerate && (
           <Button
             className="Button Button--link StoryChainLineCard-mod"

@@ -25,6 +25,10 @@ export function openStoryForm(attrs: Record<string, any>): void {
   app.modal.show(StoryModal, attrs);
 }
 
-import StoryModal from './components/StoryModal';
+export function openLineForm(attrs: Record<string, any>): void {
+  app.modal.show(LineModal, attrs);
+}
+
+import StoryModal, { LineModal } from './components/StoryModal';
 export { default as StoriesPage } from './components/StoriesPage';
 export { default as StoryPage } from './components/StoryPage';

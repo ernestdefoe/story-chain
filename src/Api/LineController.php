@@ -9,6 +9,7 @@ use ErnestDefoe\StoryChain\Line;
 use ErnestDefoe\StoryChain\Settings;
 use ErnestDefoe\StoryChain\Story;
 use Flarum\Http\RequestUtil;
+use Flarum\User\User;
 use Illuminate\Database\ConnectionInterface;
 use Laminas\Diactoros\Response\EmptyResponse;
 use Psr\Http\Message\ResponseInterface;
@@ -16,6 +17,8 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 /**
+ * POST /api/stories/lines/{id} {body}: fix a line's wording (Line::rewrite).
+ *
  * POST /api/stories/lines/{id} {hidden}: a moderator removes a line from the
  * story (or puts it back). The row stays, so positions never shift; the
  * story's line and contributor counts follow, and a story with an end gets
@@ -32,8 +35,13 @@ class LineController implements RequestHandlerInterface
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
+        $input = $this->body($request);
+        if (array_key_exists('body', $input)) {
+            return $this->rewrite($request, $actor, $input['body']);
+        }
+
         $actor->assertCan(Settings::MODERATE);
-        $hidden = (bool) ($this->body($request)['hidden'] ?? true);
+        $hidden = (bool) ($input['hidden'] ?? true);
 
         $response = $this->db->transaction(function () use ($request, $actor, $hidden) {
             $line = Line::query()->find($this->id($request));
@@ -59,6 +67,29 @@ class LineController implements RequestHandlerInterface
             $story->save();
 
             return new EmptyResponse(204);
+        });
+        $this->card->forget();
+
+        return $response;
+    }
+
+    private function rewrite(ServerRequestInterface $request, User $actor, mixed $text): ResponseInterface
+    {
+        $actor->assertRegistered();
+        $actor->assertCan(Settings::VIEW);
+
+        $response = $this->db->transaction(function () use ($request, $actor, $text) {
+            $line = Line::query()->find($this->id($request));
+            $story = $line ? Story::locked($line->story_id) : null;
+            if (! $line || ! $story) {
+                return Errors::make(404, 'line_not_found');
+            }
+            // Re-read inside the story's lock: the round may have just closed.
+            $line->refresh();
+
+            $error = $line->rewrite($story, $actor, $text);
+
+            return $error ? Errors::make(['line_locked' => 403, 'line_erased' => 409][$error] ?? 422, $error) : new EmptyResponse(204);
         });
         $this->card->forget();
 

@@ -6,11 +6,13 @@ import Stream from 'flarum/common/utils/Stream';
 import extractText from 'flarum/common/utils/extractText';
 import classList from 'flarum/common/utils/classList';
 import type Mithril from 'mithril';
-import { COVERS, HOURS, call, storyUrl, t, type Story } from '../api';
+import { COVERS, HOURS, call, storyUrl, t, type Line, type Story } from '../api';
 
 interface Attrs extends IFormModalAttrs {
   /** Editing: the story, and what to do once saved. */
   story?: Story;
+  /** Editing: the opening line, which a moderator can fix here too. */
+  opening?: Line;
   onsave?: () => void;
 }
 
@@ -37,6 +39,7 @@ export default class StoryModal extends FormModal<Attrs> {
       this.hours(String(story.roundHours));
       this.ends(story.maxLines ? String(story.maxLines) : '');
       this.length(String(story.maxLength));
+      this.opening(this.attrs.opening?.body || '');
     } else {
       this.cover(COVERS[Math.floor(Math.random() * COVERS.length)]);
     }
@@ -54,6 +57,9 @@ export default class StoryModal extends FormModal<Attrs> {
     const story = this.attrs.story;
     const ends = [...new Set([...ENDS, this.ends()])].sort((a, b) => Number(a || 0) - Number(b || 0));
     const lengths = [...new Set([...LENGTHS, this.length()])].sort((a, b) => Number(a) - Number(b));
+    // An erased opening (GDPR) stays erased, so there's nothing to edit.
+    const opening = !story || !!this.attrs.opening?.body;
+    const cap = story ? Math.max(Number(this.length()), this.attrs.opening?.body.length || 0) : Number(this.length());
 
     return (
       <div className="Modal-body">
@@ -62,21 +68,21 @@ export default class StoryModal extends FormModal<Attrs> {
             <label for="sc-title">{t('form.title')}</label>
             <input id="sc-title" className="FormControl" maxlength={120} bidi={this.title_} required />
           </div>
-          {!story && (
+          {opening && (
             <div className="Form-group">
               <label for="sc-opening">{t('form.opening')}</label>
-              <p className="helpText">{t('form.opening_help')}</p>
+              <p className="helpText">{t(story ? 'form.opening_help_edit' : 'form.opening_help')}</p>
               <textarea
                 id="sc-opening"
                 className="FormControl StoryChain-serif"
                 rows={3}
-                maxlength={Number(this.length())}
+                maxlength={cap}
                 required
                 value={this.opening()}
                 oninput={(e: InputEvent) => this.opening((e.target as HTMLTextAreaElement).value.replace(/\s*\n\s*/g, ' '))}
               />
               <p className="StoryChainCounter">
-                {this.opening().trim().length} / {this.length()}
+                {this.opening().trim().length} / {cap}
               </p>
             </div>
           )}
@@ -149,7 +155,7 @@ export default class StoryModal extends FormModal<Attrs> {
       maxLines: this.ends() ? Number(this.ends()) : null,
       maxLength: Number(this.length()),
     };
-    if (!story) body.opening = this.opening();
+    if (!story || (this.attrs.opening?.body && this.opening().trim() !== this.attrs.opening.body)) body.opening = this.opening();
 
     this.loading = true;
     call<{ id: number; slug: string }>(story ? 'PATCH' : 'POST', story ? `/${story.id}` : '', body)
@@ -157,6 +163,78 @@ export default class StoryModal extends FormModal<Attrs> {
         this.hide();
         if (story) this.attrs.onsave?.();
         else m.route.set(storyUrl(saved));
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.loading = false;
+        m.redraw();
+      });
+  }
+}
+
+interface LineAttrs extends IFormModalAttrs {
+  line: Line;
+  story: Story;
+  onsave: () => void;
+}
+
+/** Fix the wording of a line: its writer (a typo's worth once it has won) or a moderator. */
+export class LineModal extends FormModal<LineAttrs> {
+  text = Stream('');
+
+  oninit(vnode: Mithril.Vnode<LineAttrs, this>) {
+    super.oninit(vnode);
+    this.text(this.attrs.line.body);
+  }
+
+  className() {
+    return 'StoryChainModal Modal--small';
+  }
+
+  title() {
+    return t(this.attrs.line.round ? 'form.fix_title' : 'form.fix_title_opening');
+  }
+
+  content() {
+    const { line, story } = this.attrs;
+    const cap = Math.max(line.round ? story.maxLength : 500, line.body.length);
+    const help = story.canModerate ? 'form.fix_help_moderator' : line.round ? 'form.fix_help_won' : 'form.fix_help_opening';
+
+    return (
+      <div className="Modal-body">
+        <div className="Form">
+          <div className="Form-group">
+            <p className="helpText">{t(help)}</p>
+            <textarea
+              className="FormControl StoryChain-serif"
+              rows={3}
+              maxlength={cap}
+              required
+              aria-label={extractText(this.title())}
+              value={this.text()}
+              oninput={(e: InputEvent) => this.text((e.target as HTMLTextAreaElement).value.replace(/\s*\n\s*/g, ' '))}
+            />
+            <p className="StoryChainCounter">
+              {this.text().trim().length} / {cap}
+            </p>
+          </div>
+          <div className="Form-group">
+            <Button type="submit" className="Button Button--primary Button--block" loading={this.loading} disabled={this.text().trim().length < 2}>
+              {t('form.submit_edit')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  onsubmit(e: SubmitEvent) {
+    e.preventDefault();
+    this.loading = true;
+    call('POST', `/lines/${this.attrs.line.id}`, { body: this.text() })
+      .then(() => {
+        this.hide();
+        this.attrs.onsave();
       })
       .catch(() => {})
       .finally(() => {

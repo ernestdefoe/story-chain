@@ -22,7 +22,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 
 /**
  * POST  /api/stories        start a story from its opening line (storyChain.start)
- * PATCH /api/stories/{id}   a moderator edits it, makes the open round the
+ * PATCH /api/stories/{id}   a moderator edits it (the opening line too), makes the open round the
  *                           last, closes the round now, or finishes the story
  *
  * Only the fields named here are read; counters, rounds and status are the
@@ -119,7 +119,7 @@ class SaveController implements RequestHandlerInterface
         }
 
         $finished = null;
-        $response = $this->db->transaction(function () use ($request, $input, $action, &$finished) {
+        $response = $this->db->transaction(function () use ($request, $actor, $input, $action, &$finished) {
             $story = Story::locked($this->id($request));
             if (! $story) {
                 return Errors::make(404, 'story_not_found');
@@ -127,6 +127,13 @@ class SaveController implements RequestHandlerInterface
 
             if ($error = $this->fill($story, $input)) {
                 return $error;
+            }
+
+            if (array_key_exists('opening', $input)) {
+                $opening = Line::query()->where('story_id', $story->id)->where('position', 1)->first();
+                if ($opening && $opening->body !== Text::clean($input['opening']) && ($error = $opening->rewrite($story, $actor, $input['opening']))) {
+                    return Errors::make($error === 'line_erased' ? 409 : 422, $error);
+                }
             }
 
             if (array_key_exists('finalRound', $input) && $story->isActive()) {
