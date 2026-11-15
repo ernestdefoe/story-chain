@@ -47,7 +47,7 @@ class ShowController implements RequestHandlerInterface
         if (! $story) {
             return Errors::make(404, 'story_not_found');
         }
-        if ($story->isActive() && $story->round_ends_at->isPast() && $this->closer->close($story->id)) {
+        if ($story->isActive() && $story->round_ends_at->isPast() && $this->closer->closeIfFree($story->id)) {
             $story = $story->fresh() ?? $story;
         }
 

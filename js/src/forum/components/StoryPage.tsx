@@ -9,7 +9,7 @@ import Avatar from 'flarum/common/components/Avatar';
 import classList from 'flarum/common/utils/classList';
 import extractText from 'flarum/common/utils/extractText';
 import type Mithril from 'mithril';
-import { call, now, setSkew, span, t, type Candidate, type Detail, type Line, type Round } from '../api';
+import { call, doc, now, setSkew, span, t, type Candidate, type Detail, type Line, type Round } from '../api';
 import { Book, Person, date, pushUsers, useClock, user } from './parts';
 import { IndexSidebar, PageStructure, openLineForm, openStoryForm } from '../pages';
 
@@ -155,10 +155,10 @@ export default class StoryPage extends Page {
   manage(): Mithril.Children {
     const story = this.data!.story;
     const active = story.status === 'active';
-    const patch = (body: Record<string, any>) =>
-      call('PATCH', `/${story.id}`, body)
-        .then(() => this.load())
-        .catch(() => {});
+    // call() shows what went wrong; either way the page reloads to show the story as it is now.
+    const refresh = () => this.load(true);
+    const patch = (attributes: Record<string, any>) =>
+      call('PATCH', `/story-chain-stories/${story.id}`, doc('story-chain-stories', attributes, story.id)).then(refresh, refresh);
 
     return (
       <Dropdown
@@ -176,7 +176,12 @@ export default class StoryPage extends Page {
           {t('manage.edit')}
         </Button>
         {active && (
-          <Button icon="fas fa-forward-step" onclick={() => confirm(extractText(t('manage.confirm_close'))) && patch({ action: 'close' })}>
+          <Button
+            icon="fas fa-forward-step"
+            onclick={() =>
+              confirm(extractText(t('manage.confirm_close'))) && call('POST', `/story-chain-stories/${story.id}/close`).then(refresh, refresh)
+            }
+          >
             {t('manage.close')}
           </Button>
         )}
@@ -188,7 +193,7 @@ export default class StoryPage extends Page {
         {active && (
           <Button
             icon="fas fa-book"
-            onclick={() => confirm(extractText(t('manage.confirm_finish', { title: story.title }))) && patch({ action: 'finish' })}
+            onclick={() => confirm(extractText(t('manage.confirm_finish', { title: story.title }))) && patch({ status: 'finished' })}
           >
             {t('manage.finish')}
           </Button>
@@ -198,9 +203,7 @@ export default class StoryPage extends Page {
           className="StoryChainManage-danger"
           onclick={() =>
             confirm(extractText(t('manage.confirm_delete', { title: story.title }))) &&
-            call('DELETE', `/${story.id}`)
-              .then(() => m.route.set(app.route('story-chain')))
-              .catch(() => {})
+            call('DELETE', `/story-chain-stories/${story.id}`).then(() => m.route.set(app.route('story-chain')), refresh)
           }
         >
           {t('manage.delete')}
@@ -309,13 +312,14 @@ export default class StoryPage extends Page {
             className="Button Button--link StoryChainLineCard-mod"
             icon={line.hidden ? 'fas fa-rotate-left' : 'fas fa-eye-slash'}
             onclick={() =>
-              call('POST', `/lines/${line.id}`, { hidden: !line.hidden })
-                .then(() => {
+              call('PATCH', `/story-chain-lines/${line.id}`, doc('story-chain-lines', { hidden: !line.hidden }, line.id)).then(
+                () => {
                   this.focus = null;
                   this.pinned = false;
                   this.load();
-                })
-                .catch(() => {})
+                },
+                () => this.load(true)
+              )
             }
           >
             {t(line.hidden ? 'manage.restore_line' : 'manage.remove_line')}
@@ -612,8 +616,10 @@ export default class StoryPage extends Page {
   }
 
   moderate(candidate: Candidate) {
-    call('POST', `/candidates/${candidate.id}`, { hidden: !candidate.hidden })
-      .then(() => this.load())
-      .catch(() => {});
+    // call() shows what went wrong; either way the round reloads as it is now.
+    call('POST', `/candidates/${candidate.id}`, { hidden: !candidate.hidden }).then(
+      () => this.load(),
+      () => this.load(true)
+    );
   }
 }

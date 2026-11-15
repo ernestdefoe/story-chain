@@ -7,6 +7,7 @@ use ErnestDefoe\StoryChain\Candidate;
 use ErnestDefoe\StoryChain\CardCache;
 use ErnestDefoe\StoryChain\Settings;
 use ErnestDefoe\StoryChain\Story;
+use ErnestDefoe\StoryChain\StoryLock;
 use ErnestDefoe\StoryChain\Text;
 use ErnestDefoe\StoryChain\Vote;
 use Flarum\Http\RequestUtil;
@@ -36,6 +37,7 @@ class OfferController implements RequestHandlerInterface
 
     public function __construct(
         private readonly ConnectionInterface $db,
+        private readonly StoryLock $lock,
         private readonly SettingsRepositoryInterface $settings,
         private readonly RateLimit $limits,
         private readonly CardCache $card,
@@ -69,7 +71,7 @@ class OfferController implements RequestHandlerInterface
 
         $body = Text::clean($this->body($request)['body'] ?? null);
 
-        return $this->db->transaction(function () use ($request, $actor, $body) {
+        return $this->lock->hold($this->id($request), fn () => $this->db->transaction(function () use ($request, $actor, $body) {
             $story = Story::locked($this->id($request));
             if (! $story) {
                 return Errors::make(404, 'story_not_found');
@@ -108,12 +110,12 @@ class OfferController implements RequestHandlerInterface
             }
 
             return new JsonResponse(['id' => $candidate->id], 201);
-        });
+        }));
     }
 
     private function withdraw(ServerRequestInterface $request, User $actor): ResponseInterface
     {
-        return $this->db->transaction(function () use ($request, $actor) {
+        return $this->lock->hold($this->storyOf($request), fn () => $this->db->transaction(function () use ($request, $actor) {
             $candidate = Candidate::query()->find($this->id($request));
             if (! $candidate || $candidate->user_id !== $actor->id) {
                 return Errors::make(404, 'line_not_found');
@@ -131,7 +133,7 @@ class OfferController implements RequestHandlerInterface
             $candidate->delete();
 
             return new EmptyResponse(204);
-        });
+        }));
     }
 
     private function moderate(ServerRequestInterface $request, User $actor): ResponseInterface
@@ -139,7 +141,7 @@ class OfferController implements RequestHandlerInterface
         $actor->assertCan(Settings::MODERATE);
         $hidden = (bool) ($this->body($request)['hidden'] ?? true);
 
-        return $this->db->transaction(function () use ($request, $actor, $hidden) {
+        return $this->lock->hold($this->storyOf($request), fn () => $this->db->transaction(function () use ($request, $actor, $hidden) {
             $candidate = Candidate::query()->find($this->id($request));
             if (! $candidate) {
                 return Errors::make(404, 'line_not_found');
@@ -161,6 +163,12 @@ class OfferController implements RequestHandlerInterface
             $candidate->save();
 
             return new EmptyResponse(204);
-        });
+        }));
+    }
+
+    /** The story a candidate belongs to, to hold it while the candidate changes. */
+    private function storyOf(ServerRequestInterface $request): int
+    {
+        return (int) Candidate::query()->whereKey($this->id($request))->value('story_id');
     }
 }

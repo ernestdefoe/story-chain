@@ -29,7 +29,7 @@ class PageContent
         $document->title = $title;
         $document->canonicalUrl = $this->url->to('forum')->route('story-chain');
 
-        $id = (int) Arr::get($request->getQueryParams(), 'id');
+        $id = (int) Arr::get((array) $request->getAttribute('routeParameters'), 'id');
         if (! $id || ! RequestUtil::getActor($request)->can(Settings::VIEW)) {
             return $document;
         }

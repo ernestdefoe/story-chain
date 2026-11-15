@@ -6,7 +6,7 @@ import Stream from 'flarum/common/utils/Stream';
 import extractText from 'flarum/common/utils/extractText';
 import classList from 'flarum/common/utils/classList';
 import type Mithril from 'mithril';
-import { COVERS, HOURS, call, storyUrl, t, type Line, type Story } from '../api';
+import { COVERS, HOURS, call, doc, storyUrl, t, type Line, type Story } from '../api';
 
 interface Attrs extends IFormModalAttrs {
   /** Editing: the story, and what to do once saved. */
@@ -158,17 +158,22 @@ export default class StoryModal extends FormModal<Attrs> {
     if (!story || (this.attrs.opening?.body && this.opening().trim() !== this.attrs.opening.body)) body.opening = this.opening();
 
     this.loading = true;
-    call<{ id: number; slug: string }>(story ? 'PATCH' : 'POST', story ? `/${story.id}` : '', body)
-      .then((saved) => {
+    call<{ data: { id: string; attributes: { slug: string } } }>(
+      story ? 'PATCH' : 'POST',
+      story ? `/story-chain-stories/${story.id}` : '/story-chain-stories',
+      doc('story-chain-stories', body, story?.id)
+    ).then(
+      (saved) => {
         this.hide();
         if (story) this.attrs.onsave?.();
-        else m.route.set(storyUrl(saved));
-      })
-      .catch(() => {})
-      .finally(() => {
+        else m.route.set(storyUrl({ id: Number(saved.data.id), slug: saved.data.attributes.slug }));
+      },
+      // call() has shown what went wrong; the form stays open with what was typed.
+      () => {
         this.loading = false;
         m.redraw();
-      });
+      }
+    );
   }
 }
 
@@ -231,15 +236,17 @@ export class LineModal extends FormModal<LineAttrs> {
   onsubmit(e: SubmitEvent) {
     e.preventDefault();
     this.loading = true;
-    call('POST', `/lines/${this.attrs.line.id}`, { body: this.text() })
-      .then(() => {
+    const line = this.attrs.line;
+    call('PATCH', `/story-chain-lines/${line.id}`, doc('story-chain-lines', { body: this.text() }, line.id)).then(
+      () => {
         this.hide();
         this.attrs.onsave();
-      })
-      .catch(() => {})
-      .finally(() => {
+      },
+      // call() has shown what went wrong; the form stays open with what was typed.
+      () => {
         this.loading = false;
         m.redraw();
-      });
+      }
+    );
   }
 }

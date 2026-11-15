@@ -8,6 +8,8 @@ use ErnestDefoe\StoryChain\Closer;
 use ErnestDefoe\StoryChain\Line;
 use ErnestDefoe\StoryChain\Settings;
 use ErnestDefoe\StoryChain\Story;
+use ErnestDefoe\StoryChain\StoryLock;
+use ErnestDefoe\StoryChain\Text;
 use ErnestDefoe\StoryChain\Vote;
 use Flarum\Group\Group;
 use Flarum\Notification\Notification;
@@ -50,6 +52,37 @@ class StoryTest extends TestCase
         return [$response->getStatusCode(), json_decode((string) $response->getBody(), true)];
     }
 
+    /**
+     * The story-chain-stories / story-chain-lines resources, with a JSON:API body.
+     *
+     * @return array{int, array<string, mixed>|null}
+     */
+    private function resource(string $method, string $path, ?int $as, array $attributes = []): array
+    {
+        $options = $as ? ['authenticatedAs' => $as] : [];
+        if ($method !== 'GET' && $method !== 'DELETE') {
+            [$type, $id] = array_pad(explode('/', trim($path, '/'), 2), 2, null);
+            $options['json'] = ['data' => array_filter(['type' => $type, 'id' => $id, 'attributes' => $attributes], fn ($v) => $v !== null)];
+        }
+        [$path, $query] = array_pad(explode('?', ltrim($path, '/'), 2), 2, '');
+        parse_str($query, $params);
+        $response = $this->send($this->request($method, '/api/'.$path, $options)->withQueryParams($params));
+
+        return [$response->getStatusCode(), json_decode((string) $response->getBody(), true)];
+    }
+
+    /** @return array{int, array<string, mixed>|null} */
+    private function story(string $method, ?int $id, ?int $as, array $attributes = []): array
+    {
+        return $this->resource($method, 'story-chain-stories'.($id ? "/$id" : ''), $as, $attributes);
+    }
+
+    /** @return array{int, array<string, mixed>|null} */
+    private function line(int $id, int $as, array $attributes): array
+    {
+        return $this->resource('PATCH', "story-chain-lines/$id", $as, $attributes);
+    }
+
     private function put(string $key, mixed $value): void
     {
         $this->app()->getContainer()->make(SettingsRepositoryInterface::class)->set($key, $value);
@@ -58,10 +91,10 @@ class StoryTest extends TestCase
     /** A story started by the admin; returns its id. */
     private function start(array $overrides = []): int
     {
-        [$status, $body] = $this->api('POST', '', 1, $overrides + ['title' => 'The Lighthouse', 'opening' => 'The lamp came on by itself.', 'maxLines' => 5]);
+        [$status, $body] = $this->story('POST', null, 1, $overrides + ['title' => 'The Lighthouse', 'opening' => 'The lamp came on by itself.', 'maxLines' => 5]);
         $this->assertSame(201, $status, json_encode($body));
 
-        return $body['id'];
+        return (int) $body['data']['id'];
     }
 
     private function offer(int $story, int $as, string $text): int
@@ -91,8 +124,8 @@ class StoryTest extends TestCase
     public function only_starters_start_stories_and_the_opening_line_is_line_one(): void
     {
         $this->app();
-        $this->assertSame(403, $this->api('POST', '', 2, ['title' => 'Mine', 'opening' => 'Once.'])[0]);
-        $this->assertContains($this->api('POST', '', null, ['title' => 'Mine', 'opening' => 'Once.'])[0], [400, 401]);
+        $this->assertSame(403, $this->story('POST', null, 2, ['title' => 'Mine', 'opening' => 'Once.'])[0]);
+        $this->assertContains($this->story('POST', null, null, ['title' => 'Mine', 'opening' => 'Once.'])[0], [400, 401]);
 
         $id = $this->start();
         [$status, $body] = $this->api('GET', "/$id", null);
@@ -245,8 +278,8 @@ class StoryTest extends TestCase
         $this->assertSame(409, $this->api('POST', "/$id/lines", 4, ['body' => 'Too late.'])[0]);
 
         $other = $this->start(['title' => 'Open ended', 'maxLines' => null]);
-        $this->assertSame(403, $this->api('PATCH', "/$other", 2, ['finalRound' => true])[0]);
-        $this->assertSame(200, $this->api('PATCH', "/$other", 1, ['finalRound' => true])[0]);
+        $this->assertSame(403, $this->story('PATCH', $other, 2, ['finalRound' => true])[0]);
+        $this->assertSame(200, $this->story('PATCH', $other, 1, ['finalRound' => true])[0]);
         $this->offer($other, 2, 'The end.');
         $this->runOut($other);
         $this->closer()->close($other);
@@ -300,8 +333,8 @@ class StoryTest extends TestCase
 
         // A line in the story: hidden from readers, counts follow.
         $line = Line::query()->where('story_id', $id)->value('id');
-        $this->assertSame(403, $this->api('POST', "/lines/$line", 2, ['hidden' => true])[0]);
-        $this->assertSame(204, $this->api('POST', "/lines/$line", 1, ['hidden' => true])[0]);
+        $this->assertSame(403, $this->line($line, 2, ['hidden' => true])[0]);
+        $this->assertSame(200, $this->line($line, 1, ['hidden' => true])[0]);
         [, $view] = $this->api('GET', "/$id", 4);
         $this->assertSame([], $view['lines']);
         $this->assertSame([0, 0], [Story::query()->find($id)->line_count, Story::query()->find($id)->contributor_count]);
@@ -314,7 +347,7 @@ class StoryTest extends TestCase
         $this->app();
         $codes = [];
         foreach (range(1, 4) as $i) {
-            $codes[] = $this->api('POST', '', 2, ['title' => "Story $i", 'opening' => 'Once upon a time.'])[0];
+            $codes[] = $this->story('POST', null, 2, ['title' => "Story $i", 'opening' => 'Once upon a time.'])[0];
         }
         $this->assertSame([201, 201, 429, 429], $codes);
     }
@@ -327,9 +360,10 @@ class StoryTest extends TestCase
         $count = function () use ($db): int {
             $db->flushQueryLog();
             $db->enableQueryLog();
-            $this->api('GET', '', 2);
-            // Ours only: core's session and last-seen writes come and go between requests.
-            $n = count(array_filter(array_column($db->getQueryLog(), 'query'), fn ($q) => str_contains($q, 'story_chain') || str_contains($q, 'users" where "id" in')));
+            $this->assertSame(200, $this->resource('GET', 'story-chain-stories?filter[status]=active', 2)[0]);
+            $this->assertSame(200, $this->resource('GET', 'story-chain-stories?filter[status]=finished', 2)[0]);
+            // Ours and the people they include: core's session and last-seen writes come and go between requests.
+            $n = count(array_filter(array_column($db->getQueryLog(), 'query'), fn ($q) => str_contains($q, 'story_chain') || str_contains($q, 'from "users"') || str_contains($q, 'group_user')));
             $db->disableQueryLog();
 
             return $n;
@@ -394,7 +428,7 @@ class StoryTest extends TestCase
         $this->assertSame('', $lines[1]->body);
         $this->assertSame('Line by 3.', $lines[2]->body);
         // An erased line can't be put back by a moderator.
-        [$status, $body] = $this->api('POST', '/lines/'.$lines[1]->id, 1, ['hidden' => false]);
+        [$status, $body] = $this->line($lines[1]->id, 1, ['hidden' => false]);
         $this->assertSame([409, 'line_erased'], [$status, $body['errors'][0]['code']]);
         $this->assertNull($lines[1]->user_id);
         $this->assertNull($lines[2]->hidden_at);
@@ -410,7 +444,7 @@ class StoryTest extends TestCase
         $a = $this->offer($id, 2, 'Never added.');
         $this->vote($id, 3, $a);
 
-        $this->assertSame(200, $this->api('PATCH', "/$id", 1, ['action' => 'finish'])[0]);
+        $this->assertSame(200, $this->story('PATCH', $id, 1, ['status' => 'finished'])[0]);
 
         $this->assertSame('finished', Story::query()->find($id)->status);
         $this->assertSame(0, Notification::query()->where('type', 'storyChainWon')->count());
@@ -453,8 +487,9 @@ class StoryTest extends TestCase
         $this->closer()->close($id);
         $this->offer($id, 4, 'Round two.');
 
-        [, $body] = $this->api('GET', '', 5);
-        $this->assertSame(1, $body['active'][0]['offered']);
+        [, $body] = $this->resource('GET', 'story-chain-stories?filter[status]=active', 5);
+        $this->assertSame(1, $body['data'][0]['attributes']['offered']);
+        $this->assertSame('Round one.', collect($body['included'])->firstWhere('type', 'story-chain-lines')['attributes']['body']);
     }
 
     #[Test]
@@ -462,27 +497,27 @@ class StoryTest extends TestCase
     {
         $this->prepareDatabase(['group_permission' => [['permission' => Settings::START, 'group_id' => Group::MEMBER_ID]]]);
         $this->app();
-        [, $body] = $this->api('POST', '', 2, ['title' => 'Typos', 'opening' => 'Teh lamp came on.']);
-        $id = $body['id'];
+        [, $body] = $this->story('POST', null, 2, ['title' => 'Typos', 'opening' => 'Teh lamp came on.']);
+        $id = (int) $body['data']['id'];
         $opening = Line::query()->where('story_id', $id)->value('id');
 
         // Nobody else, and nothing empty or too long.
-        $this->assertSame([403, 'line_locked'], $this->code('POST', "/lines/$opening", 3, ['body' => 'Mine now.']));
-        $this->assertSame([422, 'line_empty'], $this->code('POST', "/lines/$opening", 2, ['body' => ' ']));
-        $this->assertSame([422, 'line_too_long'], $this->code('POST', "/lines/$opening", 2, ['body' => str_repeat('a', 501)]));
+        $this->assertSame([403, 'line_locked'], $this->codeOf($this->line($opening, 3, ['body' => 'Mine now.'])));
+        $this->assertSame([422, 'line_empty'], $this->codeOf($this->line($opening, 2, ['body' => ' '])));
+        $this->assertSame([422, 'line_too_long'], $this->codeOf($this->line($opening, 2, ['body' => str_repeat('a', 501)])));
 
         // The opening line was never voted on, so its starter may rewrite it freely.
-        $this->assertSame(204, $this->api('POST', "/lines/$opening", 2, ['body' => "The lamp\n came on by itself, at noon."])[0]);
+        $this->assertSame(200, $this->line($opening, 2, ['body' => "The lamp\n came on by itself, at noon."])[0]);
         $this->assertSame('The lamp came on by itself, at noon.', Line::query()->find($opening)->body);
 
         // A member can't use the moderators' Edit Story to do it.
-        $this->assertSame(403, $this->api('PATCH', "/$id", 2, ['opening' => 'Sneaky.'])[0]);
+        $this->assertSame(403, $this->story('PATCH', $id, 2, ['opening' => 'Sneaky.'])[0]);
 
         // Once the first round closes, it's settled.
         $this->offer($id, 3, 'A gull landed on the rail.');
         $this->runOut($id);
         $this->closer()->close($id);
-        $this->assertSame([403, 'line_locked'], $this->code('POST', "/lines/$opening", 2, ['body' => 'The lamp came on.']));
+        $this->assertSame([403, 'line_locked'], $this->codeOf($this->line($opening, 2, ['body' => 'The lamp came on.'])));
     }
 
     #[Test]
@@ -495,15 +530,15 @@ class StoryTest extends TestCase
         $won = Line::query()->where('story_id', $id)->where('position', 2)->value('id');
 
         // A typo, yes; a different line, no: it won with its own words.
-        $this->assertSame([422, 'edit_too_big'], $this->code('POST', "/lines/$won", 2, ['body' => 'Then the whole town went to sleep, every last one of them.']));
-        $this->assertSame(204, $this->api('POST', "/lines/$won", 2, ['body' => 'A gull landed on the rail and looked at the lamp for a long time.'])[0]);
+        $this->assertSame([422, 'edit_too_big'], $this->codeOf($this->line($won, 2, ['body' => 'Then the whole town went to sleep, every last one of them.'])));
+        $this->assertSame(200, $this->line($won, 2, ['body' => 'A gull landed on the rail and looked at the lamp for a long time.'])[0]);
         $this->assertSame('A gull landed on the rail and looked at the lamp for a long time.', Line::query()->find($won)->body);
 
         // The next line lands: the window closes.
         $this->offer($id, 3, 'Then the fog came in.');
         $this->runOut($id);
         $this->closer()->close($id);
-        $this->assertSame([403, 'line_locked'], $this->code('POST', "/lines/$won", 2, ['body' => 'A gull landed on the rail.']));
+        $this->assertSame([403, 'line_locked'], $this->codeOf($this->line($won, 2, ['body' => 'A gull landed on the rail.'])));
     }
 
     #[Test]
@@ -514,26 +549,123 @@ class StoryTest extends TestCase
         $this->runOut($id);
         $this->closer()->close($id);
 
-        $this->assertSame(200, $this->api('PATCH', "/$id", 1, ['title' => 'The Lighthouse', 'opening' => 'The lamp came on by itself, twice.'])[0]);
+        $this->assertSame(200, $this->story('PATCH', $id, 1, ['title' => 'The Lighthouse', 'opening' => 'The lamp came on by itself, twice.'])[0]);
         $lines = Line::query()->where('story_id', $id)->orderBy('position')->get();
         $this->assertSame(['The lamp came on by itself, twice.', 'A gull landed on the rail.'], $lines->pluck('body')->all());
         $this->assertSame(1, $lines[0]->user_id);
 
         // Unchanged text is no edit at all.
-        $this->assertSame(200, $this->api('PATCH', "/$id", 1, ['opening' => 'The lamp came on by itself, twice.'])[0]);
+        $this->assertSame(200, $this->story('PATCH', $id, 1, ['opening' => 'The lamp came on by itself, twice.'])[0]);
 
         // Moderators may fix any line, even a whole rewrite of a won one.
-        $this->assertSame(204, $this->api('POST', '/lines/'.$lines[1]->id, 1, ['body' => 'A heron, not a gull, landed on the rail.'])[0]);
+        $this->assertSame(200, $this->line($lines[1]->id, 1, ['body' => 'A heron, not a gull, landed on the rail.'])[0]);
 
         Line::query()->where('id', $lines[0]->id)->update(['body' => '', 'hidden_at' => Carbon::now()]);
-        $this->assertSame([409, 'line_erased'], $this->code('PATCH', "/$id", 1, ['opening' => 'Back again.']));
-        $this->assertSame([409, 'line_erased'], $this->code('POST', '/lines/'.$lines[0]->id, 1, ['body' => 'Back again.']));
+        $this->assertSame([409, 'line_erased'], $this->codeOf($this->story('PATCH', $id, 1, ['opening' => 'Back again.'])));
+        $this->assertSame([409, 'line_erased'], $this->codeOf($this->line($lines[0]->id, 1, ['body' => 'Back again.'])));
     }
 
-    /** @return array{int, string|null} */
-    private function code(string $method, string $path, int $as, array $body): array
+    #[Test]
+    public function stories_are_a_json_api_resource_with_the_library_a_page_at_a_time(): void
     {
-        [$status, $json] = $this->api($method, $path, $as, $body);
+        $id = $this->start();
+        $this->offer($id, 2, 'A gull landed on the rail.');
+
+        // Only moderators close a round early or delete a story.
+        $this->assertSame([403, 'permission_denied'], $this->codeOf($this->resource('POST', "story-chain-stories/$id/close", 2)));
+        $this->assertSame(200, $this->resource('POST', "story-chain-stories/$id/close", 1)[0]);
+        $this->assertSame(2, Story::query()->find($id)->line_count);
+
+        [$status, $show] = $this->story('GET', $id, null);
+        $this->assertSame([200, 'The Lighthouse', 2], [$status, $show['data']['attributes']['title'], $show['data']['attributes']['round']]);
+        $this->assertArrayNotHasKey('opening', $show['data']['attributes']);
+
+        // Refusals carry their code.
+        $this->assertSame([422, 'title_invalid'], $this->codeOf($this->story('PATCH', $id, 1, ['title' => 'x'])));
+
+        foreach (range(1, 3) as $i) {
+            $done = $this->start(['title' => "Done $i"]);
+            [, $finished] = $this->story('PATCH', $done, 1, ['status' => 'finished']);
+            $this->assertSame('finished', $finished['data']['attributes']['status']);
+        }
+        [, $page] = $this->resource('GET', 'story-chain-stories?filter[status]=finished&page[limit]=2', null);
+        $this->assertSame(['Done 3', 'Done 2'], array_map(fn ($row) => $row['attributes']['title'], $page['data']));
+        $this->assertArrayHasKey('next', $page['links']);
+        [, $active] = $this->resource('GET', 'story-chain-stories?filter[status]=active', null);
+        $this->assertSame([(string) $id], array_column($active['data'], 'id'));
+
+        $this->assertSame(403, $this->story('DELETE', $id, 2)[0]);
+        $this->assertSame(204, $this->story('DELETE', $id, 1)[0]);
+        $this->assertSame([0, 0], [Story::query()->whereKey($id)->count(), Line::query()->where('story_id', $id)->count()]);
+    }
+
+    #[Test]
+    public function a_removed_line_is_out_of_readers_reach_and_never_a_newest_line(): void
+    {
+        $id = $this->start();
+        $this->offer($id, 2, 'A gull landed on the rail.');
+        $this->runOut($id);
+        $this->closer()->close($id);
+        $won = (int) Line::query()->where('story_id', $id)->where('position', 2)->value('id');
+
+        $this->assertSame(200, $this->line($won, 1, ['hidden' => true])[0]);
+        // Its writer can't reach it to fix it, and the list shows the opening line as the newest.
+        $this->assertSame(404, $this->line($won, 2, ['body' => 'A gull landed on the rails.'])[0]);
+        [, $active] = $this->resource('GET', 'story-chain-stories?filter[status]=active', 3);
+        $this->assertSame('The lamp came on by itself.', collect($active['included'])->firstWhere('type', 'story-chain-lines')['attributes']['body']);
+    }
+
+    #[Test]
+    public function one_writer_per_story_on_every_database_and_requests_never_wait(): void
+    {
+        // SQLite has no row locks (lockForUpdate is a no-op there): the story lock is what serialises.
+        $id = $this->start();
+        $a = $this->offer($id, 2, 'A gull landed on the rail.');
+        $lock = $this->app()->getContainer()->make('cache.store')->getStore()->lock('ernestdefoe-story-chain.story.'.$id, 30);
+        $this->assertTrue($lock->get());
+
+        $this->assertSame([409, 'busy'], $this->codeOf($this->api('POST', "/$id/lines", 3, ['body' => 'Dana here.'])));
+        $this->assertSame([409, 'busy'], $this->codeOf($this->api('POST', "/$id/vote", 3, ['candidate' => $a])));
+        $this->assertSame([409, 'busy'], $this->codeOf($this->story('PATCH', $id, 1, ['finalRound' => true])));
+        // A page load still answers; the round it can't close now waits for the next pass.
+        $this->runOut($id);
+        $this->assertSame(200, $this->api('GET', "/$id", 4)[0]);
+        StoryLock::$wait = 1;
+        $this->assertSame(0, $this->closer()->run());
+        $this->assertSame(1, Story::query()->find($id)->round);
+
+        $lock->release();
+        $this->assertSame(1, $this->closer()->run());
+        $this->assertSame(2, Story::query()->find($id)->round);
+        StoryLock::$wait = 10;
+    }
+
+    #[Test]
+    public function a_typo_is_counted_in_characters_on_any_length_of_line(): void
+    {
+        $this->assertSame(1, Text::distance('café', 'cafe'));
+        $this->assertSame(2, Text::distance('naïve 🙂', 'naive 🙃'));
+        $long = str_repeat('The lamp came on by itself. ', 16);
+        $this->assertGreaterThan(255, strlen(mb_substr($long, 0, 400)));
+        $this->assertSame(Text::length($long), Text::distance($long, ''));
+
+        // A 400-character winning line: a typo goes through, a different line doesn't.
+        $id = $this->start(['maxLength' => 500]);
+        $this->offer($id, 2, mb_substr($long, 0, 400));
+        $this->runOut($id);
+        $this->closer()->close($id);
+        $won = (int) Line::query()->where('story_id', $id)->where('position', 2)->value('id');
+        $this->assertSame([422, 'edit_too_big'], $this->codeOf($this->line($won, 2, ['body' => str_repeat('Then the fog rolled in from the sea. ', 11)])));
+        $this->assertSame(200, $this->line($won, 2, ['body' => 'Teh'.mb_substr($long, 3, 397)])[0]);
+    }
+
+    /**
+     * @param array{int, array<string, mixed>|null} $response
+     * @return array{int, string|null}
+     */
+    private function codeOf(array $response): array
+    {
+        [$status, $json] = $response;
 
         return [$status, $json['errors'][0]['code'] ?? null];
     }

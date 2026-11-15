@@ -14,7 +14,8 @@ use Psr\Log\LoggerInterface;
  * story, credited to its writer, and the next round opens, or the story
  * finishes. Safe to run twice at once or again after a crash:
  *
- *  - the story row is locked and re-read, and nothing happens unless its
+ *  - one writer per story (StoryLock, which holds on SQLite too), and the
+ *    story row is locked and re-read, and nothing happens unless its
  *    round is still the one we came to close and has run out;
  *  - the story moves on with a conditional UPDATE on that round (engines
  *    without row locks, like SQLite, still let only one closer through);
@@ -30,7 +31,21 @@ class Closer
         private readonly Queue $queue,
         private readonly CardCache $card,
         private readonly LoggerInterface $log,
+        private readonly StoryLock $lock,
     ) {
+    }
+
+    /**
+     * For a page about to show the story: close its round if it ran out and
+     * nobody else is writing to it right now (the scheduler will otherwise).
+     */
+    public function closeIfFree(int $storyId): bool
+    {
+        try {
+            return $this->close($storyId);
+        } catch (Refusal) {
+            return false;
+        }
     }
 
     /** Every round that has run out. Returns how many closed. */
@@ -41,7 +56,7 @@ class Closer
 
         foreach ($due as $id) {
             try {
-                $closed += $this->close((int) $id) ? 1 : 0;
+                $closed += $this->close((int) $id, false, true) ? 1 : 0;
             } catch (\Throwable $e) {
                 // One story's failure must not stop the others.
                 $this->log->error("[story-chain] closing story {$id} failed: ".$e->getMessage());
@@ -55,11 +70,13 @@ class Closer
      * Close the story's open round if it has run out (or right now, for a
      * moderator's "close this round"). Returns false when there was nothing
      * to close: another closer got there first, or the round is still open.
+     * While another writer holds the story it throws Refusal("busy"); only
+     * the scheduler ($wait) waits its turn.
      */
-    public function close(int $storyId, bool $now = false): bool
+    public function close(int $storyId, bool $now = false, bool $wait = false): bool
     {
         try {
-            $news = $this->db->transaction(fn () => $this->closeLocked($storyId, $now));
+            $news = $this->lock->hold($storyId, fn () => $this->db->transaction(fn () => $this->closeLocked($storyId, $now)), $wait);
         } catch (RaceLost) {
             return false;
         } catch (QueryException $e) {

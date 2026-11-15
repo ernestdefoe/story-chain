@@ -11,7 +11,7 @@ trait Finds
 {
     private function id(ServerRequestInterface $request): int
     {
-        return (int) Arr::get($request->getQueryParams(), 'id');
+        return (int) Arr::get((array) $request->getAttribute('routeParameters'), 'id');
     }
 
     private function story(ServerRequestInterface $request): ?Story

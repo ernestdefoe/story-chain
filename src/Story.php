@@ -7,6 +7,7 @@ use Flarum\Database\AbstractModel;
 use Flarum\User\User;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * @property int $id
@@ -31,6 +32,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property Carbon $created_at
  * @property Carbon|null $updated_at
  * @property User|null $user
+ * @property Line|null $newestLine
  */
 class Story extends AbstractModel
 {
@@ -66,6 +68,17 @@ class Story extends AbstractModel
         return $this->hasMany(Line::class);
     }
 
+    public function candidates(): HasMany
+    {
+        return $this->hasMany(Candidate::class);
+    }
+
+    /** The newest line readers can see (removed ones left out). */
+    public function newestLine(): HasOne
+    {
+        return $this->hasOne(Line::class)->ofMany(['id' => 'max'], fn ($query) => $query->whereNull('story_chain_lines.hidden_at'));
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::ACTIVE;
@@ -83,7 +96,11 @@ class Story extends AbstractModel
         return $this->final_round || ($this->max_lines && $this->line_count + 1 >= $this->max_lines);
     }
 
-    /** The story row, locked and re-read inside a transaction: closing, writing and voting on one story take turns. */
+    /**
+     * The story row, locked and re-read inside a transaction: closing, writing and voting on one
+     * story take turns. The row lock does nothing on SQLite, so every caller also holds the story's
+     * cache lock first (StoryLock), which does.
+     */
     public static function locked(int $id): ?self
     {
         return self::query()->lockForUpdate()->find($id);

@@ -9,17 +9,13 @@ import IndexCard from './components/IndexCard';
 export { default as extend } from './extend';
 
 /*
- * forum.js is loaded on every page, so it only wires things up: the routes,
- * the sidebar link, the card on the discussion list and the notifications.
- * The pages and the story form are one chunk, fetched when first opened.
+ * forum.js is loaded on every page, so it only wires things up: the routes
+ * and notifications (extend.ts), the sidebar link and the card on the
+ * discussion list. The pages and the story form are one chunk, fetched when
+ * first opened.
  */
 
-const page = (name: 'StoriesPage' | 'StoryPage') => () => import('./pages').then(async (pages) => (await pages.loadCore(), { default: pages[name] }));
-
 app.initializers.add('ernestdefoe/story-chain', () => {
-  app.routes['story-chain'] = { path: '/stories', component: page('StoriesPage') };
-  app.routes['story-chain.story'] = { path: '/stories/:id', component: page('StoryPage') };
-
   // String form: these components live in lazy chunks, and extending an imported copy patches one core never renders.
   extend('flarum/forum/components/IndexSidebar', 'navItems', function (items: ItemList<Mithril.Children>) {
     if (!app.forum.attribute('storyChainCanView') || !app.forum.attribute('storyChainNav')) return;

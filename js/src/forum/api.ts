@@ -85,12 +85,46 @@ export interface Detail {
 }
 
 export interface Listing {
-  active?: Story[];
-  canStart?: boolean;
+  active: Story[];
   library: Story[];
   more: boolean;
-  users: UserRow[];
-  now: string;
+}
+
+/** A JSON:API resource object, as the story-chain-stories / story-chain-lines resources send them. */
+export interface Resource {
+  type: string;
+  id: string;
+  attributes: Record<string, any>;
+  relationships?: Record<string, { data: { type: string; id: string } | null }>;
+}
+
+/** A JSON:API document from those resources. */
+export interface Doc {
+  data: Resource[];
+  included?: Resource[];
+  links?: { next?: string };
+}
+
+/** A JSON:API body for those resources. */
+export function doc(type: 'story-chain-stories' | 'story-chain-lines', attributes: Record<string, any>, id?: number) {
+  return { data: { type, ...(id ? { id: String(id) } : {}), attributes } };
+}
+
+/** The stories in a list document, each with its newest line; the people in it go to the store for Person/Avatar. */
+export function storiesOf(list: Doc): Story[] {
+  const included = list.included || [];
+  app.store.pushPayload({ data: [], included: included.filter((item) => item.type === 'users') } as any);
+
+  return list.data.map((row) => {
+    const link = row.relationships?.newestLine?.data;
+    const line = link ? included.find((item) => item.type === link.type && item.id === link.id) : null;
+    const writer = line?.relationships?.user?.data;
+    return {
+      ...(row.attributes as Story),
+      id: Number(row.id),
+      last: line ? { body: line.attributes.body, user: writer ? Number(writer.id) : null } : null,
+    };
+  });
 }
 
 export interface CardData {
@@ -127,13 +161,19 @@ export function errorText(error: any): string {
   return extractText(app.translator.trans('core.lib.error.generic_message'));
 }
 
+/**
+ * '/story-chain-stories…' and '/story-chain-lines…' are the JSON:API resources; anything else is
+ * one of the story page's plain endpoints under /api/stories.
+ */
 export function call<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, data?: Record<string, any>, quiet = false): Promise<T> {
-  const url = app.forum.attribute<string>('apiUrl') + '/stories' + path;
+  const url = app.forum.attribute<string>('apiUrl') + (path.startsWith('/story-chain-') ? '' : '/stories') + path;
   return app.request<T>({
     method,
-    url: method === 'GET' && data ? url + '?' + new URLSearchParams(data).toString() : url,
+    url: method === 'GET' && data ? url + (url.includes('?') ? '&' : '?') + new URLSearchParams(data).toString() : url,
     body: method === 'GET' ? undefined : data,
     background: method === 'GET',
+    // The server's clock, for countdowns on pages whose answer carries no time of its own.
+    config: (xhr: XMLHttpRequest) => xhr.addEventListener('load', () => setSkew(xhr.getResponseHeader('Date'))),
     errorHandler: (error: any) => {
       if (!quiet) app.alerts.show({ type: 'error' }, errorText(error));
       throw error;
@@ -143,7 +183,8 @@ export function call<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: strin
 
 /** Server time minus ours, so countdowns agree with the server's clock. */
 export let skew = 0;
-export function setSkew(serverNow: string): void {
+export function setSkew(serverNow: string | null): void {
+  if (!serverNow) return;
   const value = Date.parse(serverNow) - Date.now();
   if (Number.isFinite(value)) skew = value;
 }

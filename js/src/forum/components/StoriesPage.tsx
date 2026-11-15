@@ -6,9 +6,11 @@ import Link from 'flarum/common/components/Link';
 import LoadingIndicator from 'flarum/common/components/LoadingIndicator';
 import extractText from 'flarum/common/utils/extractText';
 import type Mithril from 'mithril';
-import { call, now, setSkew, span, storyUrl, t, type Listing, type Story } from '../api';
-import { Book, Person, pushUsers, useClock } from './parts';
+import { call, now, span, storiesOf, storyUrl, t, type Doc, type Listing, type Story } from '../api';
+import { Book, Person, useClock } from './parts';
 import { IndexSidebar, PageStructure, openStoryForm } from '../pages';
+
+const PAGE = 24;
 
 /** /stories: the stories being written and the library of finished ones. */
 export default class StoriesPage extends Page {
@@ -35,17 +37,20 @@ export default class StoriesPage extends Page {
   }
 
   load() {
-    call<Listing>('GET', '', undefined, !!this.data)
-      .then((data) => {
-        pushUsers(data.users);
-        setSkew(data.now);
-        // Keep library pages already loaded.
-        if (this.data && this.data.library.length > data.library.length) {
-          data.library = this.data.library;
-          data.more = this.data.more;
-        }
-        this.data = data;
+    const quiet = !!this.data;
+    Promise.all([
+      call<Doc>('GET', '/story-chain-stories', { 'filter[status]': 'active', 'page[limit]': '50' }, quiet),
+      // A refresh keeps library pages already loaded.
+      this.data ? null : call<Doc>('GET', '/story-chain-stories', { 'filter[status]': 'finished', 'page[limit]': String(PAGE) }, quiet),
+    ])
+      .then(([active, library]) => {
+        this.data = {
+          active: storiesOf(active),
+          library: library ? storiesOf(library) : this.data!.library,
+          more: library ? !!library.links?.next : this.data!.more,
+        };
       })
+      // A first load that failed says so; a refresh that failed keeps what's on screen (quiet: no alert).
       .catch(() => (this.error = !this.data))
       .finally(() => m.redraw());
   }
@@ -53,12 +58,17 @@ export default class StoriesPage extends Page {
   more() {
     const data = this.data!;
     this.loadingMore = true;
-    call<Listing>('GET', '', { library: String(data.library.length) })
+    call<Doc>('GET', '/story-chain-stories', {
+      'filter[status]': 'finished',
+      'page[limit]': String(PAGE),
+      'page[offset]': String(data.library.length),
+    })
       .then((page) => {
-        data.library.push(...page.library);
-        data.more = page.more;
+        data.library.push(...storiesOf(page));
+        data.more = !!page.links?.next;
       })
-      .catch(() => {})
+      // call() has already shown the alert; the button stays for another try.
+      .catch(() => (data.more = true))
       .finally(() => {
         this.loadingMore = false;
         m.redraw();
@@ -83,7 +93,7 @@ export default class StoriesPage extends Page {
           </h1>
           <p className="StoryChainHero-lead">{t('page.lead')}</p>
         </div>
-        {data?.canStart && (
+        {app.forum.attribute('storyChainCanStart') && (
           <Button className="Button Button--primary" icon="fas fa-plus" onclick={() => openStoryForm({})}>
             {t('page.start')}
           </Button>
@@ -102,7 +112,7 @@ export default class StoriesPage extends Page {
           <div className="StoryChainEmpty StoryChainEmpty--big">
             <Icon name="fas fa-book-open" />
             <p>{t('page.empty')}</p>
-            {data.canStart && <p>{t('page.empty_start')}</p>}
+            {app.forum.attribute('storyChainCanStart') && <p>{t('page.empty_start')}</p>}
           </div>
         ) : (
           [

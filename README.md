@@ -35,12 +35,16 @@ Each story sets its own round length (an hour to a week), length (a set number o
 ## Built to be trusted
 
 - Rounds close on Flarum's scheduler every minute. Closing is race-safe and idempotent: two closers at once, or a rerun after a crash, never add a line twice or skip a round. On forums without a running scheduler, a round closes when someone next opens the story.
-- Lines and votes are taken under a lock on the story, so nothing lands in a round that is closing.
+- Lines and votes are taken under a lock on the story (a cache lock as well as the database row, so SQLite too), so nothing lands in a round that is closing. A request never waits for it: if the story is busy, you're asked to try again.
 - Hidden vote counts and anonymous writers are never in the page data, not just hidden on screen.
-- Light: about 3.8 KB (gzipped) of JavaScript on every page; the pages load only when opened. The index card adds no database query to page loads.
+- Light: about 4 KB (gzipped) of JavaScript on every page; the pages load only when opened. The index card adds no database query to page loads.
 - Works in dark mode, with themes and on phones. GDPR export and erasure with flarum/gdpr.
 
 ![A finished chapter](screenshots/finished.png)
+
+## How it's built
+
+Stories and the lines in them are Flarum 2 JSON:API resources (`story-chain-stories`, `story-chain-lines`): listing, starting, editing, finishing, closing a round, deleting, and fixing or removing a line. The story page, offering a line, voting and taking a line back are a few plain endpoints under `/api/stories` on purpose: while a round is open, who offered each line and how many votes it has are left out of the answer for anyone who may not see them, and the lines in the running come in an order of their own for each viewer, so the order can't give the count away. A JSON:API include could walk around that, so the lines in the running are not a resource.
 
 ## Install
 

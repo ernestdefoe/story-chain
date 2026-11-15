@@ -74,7 +74,7 @@ class Line extends AbstractModel
         if (Text::length($text) > $limit) {
             return 'line_too_long';
         }
-        if (! $moderator && $this->round > 0 && levenshtein($this->body, $text) > max(12, intdiv(strlen($this->body), 5))) {
+        if (! $moderator && $this->round > 0 && Text::distance($this->body, $text) > max(12, intdiv(Text::length($this->body), 5))) {
             return 'edit_too_big';
         }
 

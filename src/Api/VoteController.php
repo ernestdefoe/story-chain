@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use ErnestDefoe\StoryChain\Candidate;
 use ErnestDefoe\StoryChain\Settings;
 use ErnestDefoe\StoryChain\Story;
+use ErnestDefoe\StoryChain\StoryLock;
 use ErnestDefoe\StoryChain\Vote;
 use Flarum\Http\RequestUtil;
 use Illuminate\Database\ConnectionInterface;
@@ -24,7 +25,7 @@ class VoteController implements RequestHandlerInterface
 {
     use Finds;
 
-    public function __construct(private readonly ConnectionInterface $db, private readonly RateLimit $limits)
+    public function __construct(private readonly ConnectionInterface $db, private readonly RateLimit $limits, private readonly StoryLock $lock)
     {
     }
 
@@ -41,7 +42,7 @@ class VoteController implements RequestHandlerInterface
 
         $candidateId = (int) ($this->body($request)['candidate'] ?? 0);
 
-        return $this->db->transaction(function () use ($request, $actor, $candidateId) {
+        return $this->lock->hold($this->id($request), fn () => $this->db->transaction(function () use ($request, $actor, $candidateId) {
             $story = Story::locked($this->id($request));
             if (! $story) {
                 return Errors::make(404, 'story_not_found');
@@ -81,6 +82,6 @@ class VoteController implements RequestHandlerInterface
             }
 
             return new JsonResponse(['vote' => $candidate?->id]);
-        });
+        }));
     }
 }
