@@ -85,7 +85,37 @@ export default class StoriesPage extends Page {
 
   body(): Mithril.Children {
     const data = this.data;
-    const header = (
+    if (!data) return [this.hero(), this.error ? <p className="StoryChainEmpty">{t('page.load_error')}</p> : <LoadingIndicator />];
+
+    if (!data.active.length && !data.library.length) {
+      return (
+        <div className="StoryChainIndex">
+          {this.hero()}
+          <div className="StoryChainEmpty StoryChainEmpty--big">
+            <Icon name="fas fa-book-open" />
+            <p>{t('page.empty')}</p>
+            {app.forum.attribute('storyChainCanStart') && <p>{t('page.empty_start')}</p>}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="StoryChainIndex">
+        {this.hero()}
+        {data.active.length > 0 && (
+          <section className="StoryChainSection">
+            <h2 className="StoryChainSection-title">{t('page.writing')}</h2>
+            <div className="StoryChainActive-list">{data.active.map((story) => this.active(story))}</div>
+          </section>
+        )}
+        {this.library(data)}
+      </div>
+    );
+  }
+
+  hero(): Mithril.Children {
+    return (
       <header className="StoryChainHero">
         <div className="StoryChainHero-text">
           <h1 className="StoryChainHero-title">
@@ -100,51 +130,30 @@ export default class StoriesPage extends Page {
         )}
       </header>
     );
+  }
 
-    if (!data) return [header, this.error ? <p className="StoryChainEmpty">{t('page.load_error')}</p> : <LoadingIndicator />];
-
-    const active = data.active || [];
-
+  library(data: Listing): Mithril.Children {
     return (
-      <div className="StoryChainIndex">
-        {header}
-        {!active.length && !data.library.length ? (
-          <div className="StoryChainEmpty StoryChainEmpty--big">
-            <Icon name="fas fa-book-open" />
-            <p>{t('page.empty')}</p>
-            {app.forum.attribute('storyChainCanStart') && <p>{t('page.empty_start')}</p>}
+      <section className="StoryChainSection">
+        <h2 className="StoryChainSection-title">{t('page.library')}</h2>
+        <p className="StoryChainSection-lead">{t('page.library_lead')}</p>
+        {data.library.length ? (
+          <div className="StoryChainShelf">
+            {data.library.map((story) => (
+              <Link className="StoryChainShelf-item" href={storyUrl(story)} aria-label={story.title}>
+                {Book({ story })}
+              </Link>
+            ))}
           </div>
         ) : (
-          [
-            active.length > 0 && (
-              <section className="StoryChainSection">
-                <h2 className="StoryChainSection-title">{t('page.writing')}</h2>
-                <div className="StoryChainActive-list">{active.map((story) => this.active(story))}</div>
-              </section>
-            ),
-            <section className="StoryChainSection">
-              <h2 className="StoryChainSection-title">{t('page.library')}</h2>
-              <p className="StoryChainSection-lead">{t('page.library_lead')}</p>
-              {data.library.length ? (
-                <div className="StoryChainShelf">
-                  {data.library.map((story) => (
-                    <Link className="StoryChainShelf-item" href={storyUrl(story)} aria-label={story.title}>
-                      {Book({ story })}
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <p className="StoryChainEmpty">{t('page.library_empty')}</p>
-              )}
-              {data.more && (
-                <Button className="Button StoryChainMore" loading={this.loadingMore} onclick={() => this.more()}>
-                  {t('page.more')}
-                </Button>
-              )}
-            </section>,
-          ]
+          <p className="StoryChainEmpty">{t('page.library_empty')}</p>
         )}
-      </div>
+        {data.more && (
+          <Button className="Button StoryChainMore" loading={this.loadingMore} onclick={() => this.more()}>
+            {t('page.more')}
+          </Button>
+        )}
+      </section>
     );
   }
 

@@ -7,11 +7,23 @@ import { span, storyUrl, t, type CardData } from '../api';
 
 const HIDDEN = 'storyChainCardHidden';
 
+/** The round the card was hidden for. Kept here as well, for browsers that block storage (it then lasts until the page reloads). */
+let hiddenHere: string | null = null;
+
 function hiddenFor(): string | null {
   try {
-    return localStorage.getItem(HIDDEN);
+    return localStorage.getItem(HIDDEN) || hiddenHere;
   } catch {
-    return null;
+    return hiddenHere;
+  }
+}
+
+function hide(key: string): void {
+  try {
+    localStorage.setItem(HIDDEN, key);
+  } catch {
+    // Storage is blocked (private mode, site data off): hiddenHere still hides it for this visit.
+    hiddenHere = key;
   }
 }
 
@@ -38,53 +50,62 @@ export default class IndexCard extends Component<{ card: CardData }> {
     const key = `${card.id}:${card.round}`;
     if (hiddenFor() === key) return null;
 
-    const left = Date.parse(card.endsAt) - Date.now();
-    const href = storyUrl(card);
-
     return (
       <div className={`StoryChainCard StoryChain-cover--${card.cover}`}>
         <div className="StoryChainCard-spine" aria-hidden="true">
           <Icon name="fas fa-feather-pointed" />
         </div>
-        <div className="StoryChainCard-body">
-          <div className="StoryChainCard-meta">
-            <span>{t('card.label')}</span>
-            <span aria-hidden="true">·</span>
-            <span>{t('story.round', { round: card.round })}</span>
-            <span aria-hidden="true">·</span>
-            <span className="StoryChainCard-clock">{left > 0 ? t('story.closes_in', { time: span(left) }) : t('story.closing')}</span>
-          </div>
-          <Link className="StoryChainCard-title" href={href}>
-            {card.title}
-          </Link>
-          {card.last && (
-            <p className="StoryChainCard-line">
-              <span className="StoryChainCard-quote">…{card.last}</span>
-              {card.by && <span className="StoryChainCard-by"> {card.by}</span>}
-            </p>
-          )}
-          <div className="StoryChainCard-foot">
-            <span>{t('card.offered', { count: card.offered })}</span>
-          </div>
+        {this.body(card)}
+        {this.actions(card, key)}
+      </div>
+    );
+  }
+
+  body(card: CardData): Mithril.Children {
+    const left = Date.parse(card.endsAt) - Date.now();
+
+    return (
+      <div className="StoryChainCard-body">
+        <div className="StoryChainCard-meta">
+          <span>{t('card.label')}</span>
+          <span aria-hidden="true">·</span>
+          <span>{t('story.round', { round: card.round })}</span>
+          <span aria-hidden="true">·</span>
+          <span className="StoryChainCard-clock">{left > 0 ? t('story.closes_in', { time: span(left) }) : t('story.closing')}</span>
         </div>
-        <div className="StoryChainCard-actions">
-          <Link className="Button Button--primary StoryChainCard-cta" href={href}>
-            {t('card.cta')}
-          </Link>
-          <button
-            type="button"
-            className="Button Button--icon Button--link StoryChainCard-hide"
-            aria-label={app.translator.trans('ernestdefoe-story-chain.forum.card.hide', {}, true)}
-            title={app.translator.trans('ernestdefoe-story-chain.forum.card.hide', {}, true)}
-            onclick={() => {
-              try {
-                localStorage.setItem(HIDDEN, key);
-              } catch {}
-            }}
-          >
-            <Icon name="fas fa-xmark" />
-          </button>
+        <Link className="StoryChainCard-title" href={storyUrl(card)}>
+          {card.title}
+        </Link>
+        {card.last && (
+          <p className="StoryChainCard-line">
+            <span className="StoryChainCard-quote">…{card.last}</span>
+            {card.by && <span className="StoryChainCard-by"> {card.by}</span>}
+          </p>
+        )}
+        <div className="StoryChainCard-foot">
+          <span>{t('card.offered', { count: card.offered })}</span>
         </div>
+      </div>
+    );
+  }
+
+  actions(card: CardData, key: string): Mithril.Children {
+    const label = app.translator.trans('ernestdefoe-story-chain.forum.card.hide', {}, true);
+
+    return (
+      <div className="StoryChainCard-actions">
+        <Link className="Button Button--primary StoryChainCard-cta" href={storyUrl(card)}>
+          {t('card.cta')}
+        </Link>
+        <button
+          type="button"
+          className="Button Button--icon Button--link StoryChainCard-hide"
+          aria-label={label}
+          title={label}
+          onclick={() => hide(key)}
+        >
+          <Icon name="fas fa-xmark" />
+        </button>
       </div>
     );
   }

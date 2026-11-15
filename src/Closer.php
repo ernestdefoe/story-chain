@@ -119,19 +119,7 @@ class Closer
         $winner = $ranked->first();
         $votes = (int) $ranked->sum('votes_count');
 
-        $line = null;
-        if ($winner) {
-            $line = new Line();
-            $line->story_id = $story->id;
-            $line->position = (int) Line::query()->where('story_id', $story->id)->max('position') + 1;
-            $line->round = $round;
-            $line->user_id = $winner->user_id;
-            $line->body = $winner->body;
-            $line->votes = (int) $winner->votes_count;
-            $line->rivals = $ranked->count() - 1;
-            $line->created_at = $at;
-            $line->save();
-        }
+        $line = $winner ? $this->addLine($story, $winner, $ranked->count() - 1, $at) : null;
 
         $finished = $story->final_round || ($winner && $story->max_lines && $story->line_count + 1 >= $story->max_lines);
 
@@ -159,6 +147,23 @@ class Closer
         }
 
         return ['round' => $round, 'line' => $line?->id, 'finished' => $finished];
+    }
+
+    /** The winning line joins the story after its last line (unique per story and round). */
+    private function addLine(Story $story, Candidate $winner, int $rivals, Carbon $at): Line
+    {
+        $line = new Line();
+        $line->story_id = $story->id;
+        $line->position = (int) Line::query()->where('story_id', $story->id)->max('position') + 1;
+        $line->round = $story->round;
+        $line->user_id = $winner->user_id;
+        $line->body = $winner->body;
+        $line->votes = (int) $winner->votes_count;
+        $line->rivals = $rivals;
+        $line->created_at = $at;
+        $line->save();
+
+        return $line;
     }
 
     /** People credited with a shown line. */

@@ -55,11 +55,6 @@ export default class StoryModal extends FormModal<Attrs> {
 
   content() {
     const story = this.attrs.story;
-    const ends = [...new Set([...ENDS, this.ends()])].sort((a, b) => Number(a || 0) - Number(b || 0));
-    const lengths = [...new Set([...LENGTHS, this.length()])].sort((a, b) => Number(a) - Number(b));
-    // An erased opening (GDPR) stays erased, so there's nothing to edit.
-    const opening = !story || !!this.attrs.opening?.body;
-    const cap = story ? Math.max(Number(this.length()), this.attrs.opening?.body.length || 0) : Number(this.length());
 
     return (
       <div className="Modal-body">
@@ -68,77 +63,104 @@ export default class StoryModal extends FormModal<Attrs> {
             <label for="sc-title">{t('form.title')}</label>
             <input id="sc-title" className="FormControl" maxlength={120} bidi={this.title_} required />
           </div>
-          {opening && (
-            <div className="Form-group">
-              <label for="sc-opening">{t('form.opening')}</label>
-              <p className="helpText">{t(story ? 'form.opening_help_edit' : 'form.opening_help')}</p>
-              <textarea
-                id="sc-opening"
-                className="FormControl StoryChain-serif"
-                rows={3}
-                maxlength={cap}
-                required
-                value={this.opening()}
-                oninput={(e: InputEvent) => this.opening((e.target as HTMLTextAreaElement).value.replace(/\s*\n\s*/g, ' '))}
-              />
-              <p className="StoryChainCounter">
-                {this.opening().trim().length} / {cap}
-              </p>
-            </div>
-          )}
+          {this.openingField()}
           <div className="Form-group">
             <label for="sc-blurb">{t('form.blurb')}</label>
             <p className="helpText">{t('form.blurb_help')}</p>
             <input id="sc-blurb" className="FormControl" maxlength={300} bidi={this.blurb} />
           </div>
-          <div className="Form-group">
-            <label>{t('form.cover')}</label>
-            <div className="StoryChainSwatches" role="radiogroup" aria-label={extractText(t('form.cover'))}>
-              {COVERS.map((cover) => (
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={this.cover() === cover ? 'true' : 'false'}
-                  aria-label={extractText(t(`covers.${cover}`))}
-                  title={extractText(t(`covers.${cover}`))}
-                  className={classList('StoryChainSwatch', `StoryChain-cover--${cover}`, { active: this.cover() === cover })}
-                  onclick={() => this.cover(cover)}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="StoryChainModal-row">
-            <div className="Form-group">
-              <label>{t('form.round')}</label>
-              <Select
-                value={this.hours()}
-                options={Object.fromEntries(HOURS.map((h) => [String(h), t(`hours.h${h}`)]))}
-                onchange={(value: string) => this.hours(value)}
-              />
-            </div>
-            <div className="Form-group">
-              <label>{t('form.end')}</label>
-              <Select
-                value={this.ends()}
-                options={Object.fromEntries(ends.map((n) => [n, n ? t('form.lines_count', { count: n }) : t('form.end_open')]))}
-                onchange={(value: string) => this.ends(value)}
-              />
-            </div>
-            <div className="Form-group">
-              <label>{t('form.length')}</label>
-              <Select
-                value={this.length()}
-                options={Object.fromEntries(lengths.map((n) => [n, t('form.length_count', { count: n })]))}
-                onchange={(value: string) => this.length(value)}
-              />
-            </div>
-          </div>
+          {this.coverField()}
+          {this.timingFields()}
           {story && story.status === 'active' && <p className="helpText">{t('form.timing_note')}</p>}
           <div className="Form-group">
             <Button type="submit" className="Button Button--primary Button--block" loading={this.loading}>
               {t(story ? 'form.submit_edit' : 'form.submit_new')}
             </Button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  /** The opening line: written when starting, fixed by a moderator when editing (never an erased one). */
+  openingField() {
+    const story = this.attrs.story;
+    const opening = !story || !!this.attrs.opening?.body;
+    const cap = story ? Math.max(Number(this.length()), this.attrs.opening?.body.length || 0) : Number(this.length());
+
+    return (
+      opening && (
+        <div className="Form-group">
+          <label for="sc-opening">{t('form.opening')}</label>
+          <p className="helpText">{t(story ? 'form.opening_help_edit' : 'form.opening_help')}</p>
+          <textarea
+            id="sc-opening"
+            className="FormControl StoryChain-serif"
+            rows={3}
+            maxlength={cap}
+            required
+            value={this.opening()}
+            oninput={(e: InputEvent) => this.opening((e.target as HTMLTextAreaElement).value.replace(/\s*\n\s*/g, ' '))}
+          />
+          <p className="StoryChainCounter">
+            {this.opening().trim().length} / {cap}
+          </p>
+        </div>
+      )
+    );
+  }
+
+  coverField() {
+    return (
+      <div className="Form-group">
+        <label>{t('form.cover')}</label>
+        <div className="StoryChainSwatches" role="radiogroup" aria-label={extractText(t('form.cover'))}>
+          {COVERS.map((cover) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={this.cover() === cover ? 'true' : 'false'}
+              aria-label={extractText(t(`covers.${cover}`))}
+              title={extractText(t(`covers.${cover}`))}
+              className={classList('StoryChainSwatch', `StoryChain-cover--${cover}`, { active: this.cover() === cover })}
+              onclick={() => this.cover(cover)}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  /** Round length, the story's end and the longest line, each keeping a value that isn't one of the presets. */
+  timingFields() {
+    const ends = [...new Set([...ENDS, this.ends()])].sort((a, b) => Number(a || 0) - Number(b || 0));
+    const lengths = [...new Set([...LENGTHS, this.length()])].sort((a, b) => Number(a) - Number(b));
+
+    return (
+      <div className="StoryChainModal-row">
+        <div className="Form-group">
+          <label>{t('form.round')}</label>
+          <Select
+            value={this.hours()}
+            options={Object.fromEntries(HOURS.map((h) => [String(h), t(`hours.h${h}`)]))}
+            onchange={(value: string) => this.hours(value)}
+          />
+        </div>
+        <div className="Form-group">
+          <label>{t('form.end')}</label>
+          <Select
+            value={this.ends()}
+            options={Object.fromEntries(ends.map((n) => [n, n ? t('form.lines_count', { count: n }) : t('form.end_open')]))}
+            onchange={(value: string) => this.ends(value)}
+          />
+        </div>
+        <div className="Form-group">
+          <label>{t('form.length')}</label>
+          <Select
+            value={this.length()}
+            options={Object.fromEntries(lengths.map((n) => [n, t('form.length_count', { count: n })]))}
+            onchange={(value: string) => this.length(value)}
+          />
         </div>
       </div>
     );

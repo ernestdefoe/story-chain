@@ -9,7 +9,8 @@ import Avatar from 'flarum/common/components/Avatar';
 import classList from 'flarum/common/utils/classList';
 import extractText from 'flarum/common/utils/extractText';
 import type Mithril from 'mithril';
-import { call, doc, now, setSkew, span, t, type Candidate, type Detail, type Line, type Round } from '../api';
+import { call, doc, now, setSkew, t, type Detail, type Line } from '../api';
+import RoundPanel from './RoundPanel';
 import { Book, Person, date, pushUsers, useClock, user } from './parts';
 import { IndexSidebar, PageStructure, openLineForm, openStoryForm } from '../pages';
 
@@ -25,9 +26,6 @@ const hue = (id: number | null) => (id ? (id * 137) % 360 : 0);
 export default class StoryPage extends Page {
   data: Detail | null = null;
   error = false;
-  draft = '';
-  sending = false;
-  voting: number | null = null;
   byWriter = false;
   /** The line whose card is showing, and whether a click pinned it. */
   focus: { line: Line; top: number; left: number } | null = null;
@@ -111,7 +109,7 @@ export default class StoryPage extends Page {
         {back}
         {this.header()}
         {this.text()}
-        {story.status === 'finished' ? this.ending() : round && this.round(round)}
+        {story.status === 'finished' ? this.ending() : round && <RoundPanel data={data} reload={(quiet?: boolean) => this.load(quiet)} />}
         {this.credits()}
       </div>
     );
@@ -153,13 +151,6 @@ export default class StoryPage extends Page {
   }
 
   manage(): Mithril.Children {
-    const story = this.data!.story;
-    const active = story.status === 'active';
-    // call() shows what went wrong; either way the page reloads to show the story as it is now.
-    const refresh = () => this.load(true);
-    const patch = (attributes: Record<string, any>) =>
-      call('PATCH', `/story-chain-stories/${story.id}`, doc('story-chain-stories', attributes, story.id)).then(refresh, refresh);
-
     return (
       <Dropdown
         className="StoryChainManage"
@@ -169,47 +160,49 @@ export default class StoryPage extends Page {
         icon="fas fa-sliders"
         accessibleToggleLabel={extractText(t('manage.button'))}
       >
-        <Button
-          icon="fas fa-pen"
-          onclick={() => openStoryForm({ story, opening: this.data!.lines.find((line) => line.position === 1), onsave: () => this.load() })}
-        >
-          {t('manage.edit')}
-        </Button>
-        {active && (
-          <Button
-            icon="fas fa-forward-step"
-            onclick={() =>
-              confirm(extractText(t('manage.confirm_close'))) && call('POST', `/story-chain-stories/${story.id}/close`).then(refresh, refresh)
-            }
-          >
-            {t('manage.close')}
-          </Button>
-        )}
-        {active && (
-          <Button icon="fas fa-flag-checkered" onclick={() => patch({ finalRound: !story.finalRound })}>
-            {t(story.finalRound ? 'manage.not_final' : 'manage.final')}
-          </Button>
-        )}
-        {active && (
-          <Button
-            icon="fas fa-book"
-            onclick={() => confirm(extractText(t('manage.confirm_finish', { title: story.title }))) && patch({ status: 'finished' })}
-          >
-            {t('manage.finish')}
-          </Button>
-        )}
-        <Button
-          icon="fas fa-trash"
-          className="StoryChainManage-danger"
-          onclick={() =>
-            confirm(extractText(t('manage.confirm_delete', { title: story.title }))) &&
-            call('DELETE', `/story-chain-stories/${story.id}`).then(() => m.route.set(app.route('story-chain')), refresh)
-          }
-        >
-          {t('manage.delete')}
-        </Button>
+        {this.manageItems()}
       </Dropdown>
     );
+  }
+
+  manageItems(): Mithril.Children[] {
+    const story = this.data!.story;
+    const active = story.status === 'active';
+    // call() shows what went wrong; either way the page reloads to show the story as it is now.
+    const refresh = () => this.load(true);
+    const patch = (attributes: Record<string, any>) =>
+      call('PATCH', `/story-chain-stories/${story.id}`, doc('story-chain-stories', attributes, story.id)).then(refresh, refresh);
+    const opening = this.data!.lines.find((line) => line.position === 1);
+    const item = (icon: string, label: string, onclick: () => unknown, className?: string) => (
+      <Button icon={icon} className={className} onclick={onclick}>
+        {t(label)}
+      </Button>
+    );
+
+    return [
+      item('fas fa-pen', 'manage.edit', () => openStoryForm({ story, opening, onsave: () => this.load() })),
+      active &&
+        item(
+          'fas fa-forward-step',
+          'manage.close',
+          () => confirm(extractText(t('manage.confirm_close'))) && call('POST', `/story-chain-stories/${story.id}/close`).then(refresh, refresh)
+        ),
+      active && item('fas fa-flag-checkered', story.finalRound ? 'manage.not_final' : 'manage.final', () => patch({ finalRound: !story.finalRound })),
+      active &&
+        item(
+          'fas fa-book',
+          'manage.finish',
+          () => confirm(extractText(t('manage.confirm_finish', { title: story.title }))) && patch({ status: 'finished' })
+        ),
+      item(
+        'fas fa-trash',
+        'manage.delete',
+        () =>
+          confirm(extractText(t('manage.confirm_delete', { title: story.title }))) &&
+          call('DELETE', `/story-chain-stories/${story.id}`).then(() => m.route.set(app.route('story-chain')), refresh),
+        'StoryChainManage-danger'
+      ),
+    ];
   }
 
   text(): Mithril.Children {
@@ -232,37 +225,38 @@ export default class StoryPage extends Page {
           </label>
         </div>
         <article className={classList('StoryChainText', { 'StoryChainText--writers': this.byWriter })}>
-          <p>
-            {data.lines.map((line, i) => [
-              <span
-                className={classList('StoryChainText-line', {
-                  'StoryChainText-line--first': i === 0,
-                  'StoryChainText-line--hidden': line.hidden,
-                  'StoryChainText-line--active': this.focus?.line.id === line.id,
-                })}
-                style={{ '--sc-hue': String(hue(line.user)) }}
-                tabindex="0"
-                role="button"
-                aria-label={extractText(this.lineLabel(line))}
-                onpointerenter={(e: PointerEvent) => e.pointerType === 'mouse' && !this.pinned && show(line, e.currentTarget as HTMLElement)}
-                onpointerleave={(e: PointerEvent) => e.pointerType === 'mouse' && hide(line)}
-                onfocus={(e: FocusEvent) => !this.pinned && show(line, e.currentTarget as HTMLElement)}
-                onblur={() => hide(line)}
-                onclick={(e: MouseEvent) => {
-                  const same = this.pinned && this.focus?.line.id === line.id;
-                  this.pinned = !same;
-                  if (same) this.focus = null;
-                  else show(line, e.currentTarget as HTMLElement);
-                }}
-              >
-                {line.body}
-              </span>,
-              ' ',
-            ])}
-          </p>
+          <p>{data.lines.map((line, i) => [this.lineSpan(line, i, show, hide), ' '])}</p>
           {this.focus && this.lineCard(this.focus.line)}
         </article>
       </section>
+    );
+  }
+
+  lineSpan(line: Line, i: number, show: (line: Line, target: HTMLElement) => void, hide: (line: Line) => void): Mithril.Children {
+    return (
+      <span
+        className={classList('StoryChainText-line', {
+          'StoryChainText-line--first': i === 0,
+          'StoryChainText-line--hidden': line.hidden,
+          'StoryChainText-line--active': this.focus?.line.id === line.id,
+        })}
+        style={{ '--sc-hue': String(hue(line.user)) }}
+        tabindex="0"
+        role="button"
+        aria-label={extractText(this.lineLabel(line))}
+        onpointerenter={(e: PointerEvent) => e.pointerType === 'mouse' && !this.pinned && show(line, e.currentTarget as HTMLElement)}
+        onpointerleave={(e: PointerEvent) => e.pointerType === 'mouse' && hide(line)}
+        onfocus={(e: FocusEvent) => !this.pinned && show(line, e.currentTarget as HTMLElement)}
+        onblur={() => hide(line)}
+        onclick={(e: MouseEvent) => {
+          const same = this.pinned && this.focus?.line.id === line.id;
+          this.pinned = !same;
+          if (same) this.focus = null;
+          else show(line, e.currentTarget as HTMLElement);
+        }}
+      >
+        {line.body}
+      </span>
     );
   }
 
@@ -329,192 +323,6 @@ export default class StoryPage extends Page {
     );
   }
 
-  round(round: Round): Mithril.Children {
-    const data = this.data!;
-    const story = data.story;
-    const left = Date.parse(story.endsAt) - now();
-    const total = story.roundHours * 3600000;
-    const progress = Math.min(100, Math.max(0, 100 - (left / total) * 100));
-    const last = [...data.lines].reverse().find((line) => !line.hidden && line.round > 0 && line.round === round.number - 1);
-
-    return (
-      <section className="StoryChainRound" aria-labelledby="sc-round">
-        <div className="StoryChainRound-head">
-          <div>
-            <h2 id="sc-round" className="StoryChainRound-title">
-              {t('story.round', { round: round.number })}
-              {story.lastRound && <span className="StoryChainBadge">{t('story.final')}</span>}
-            </h2>
-            {last && (
-              <p className="StoryChainRound-last">
-                {t('last.text', {
-                  name: user(last.user)?.displayName() || extractText(t('story.deleted_user')),
-                  votes: last.votes,
-                  rivals: last.rivals,
-                })}
-              </p>
-            )}
-          </div>
-          <div className="StoryChainClock" role="timer">
-            <span className="StoryChainClock-label">{left > 0 ? t('story.closes_in', { time: '' }) : t('story.closing')}</span>
-            {left > 0 && <span className="StoryChainClock-time">{span(left)}</span>}
-            <span className="StoryChainClock-bar">
-              <span style={{ width: `${progress}%` }} />
-            </span>
-          </div>
-        </div>
-
-        {this.write(round)}
-        {this.candidates(round)}
-      </section>
-    );
-  }
-
-  write(round: Round): Mithril.Children {
-    const data = this.data!;
-    const story = data.story;
-    const mine = round.candidates.find((c) => c.mine);
-
-    if (mine) {
-      return (
-        <div className={classList('StoryChainMine', { 'StoryChainMine--removed': mine.hidden })}>
-          <div className="StoryChainMine-label">{t('write.yours')}</div>
-          <p className="StoryChainMine-body">{mine.body}</p>
-          {mine.hidden ? (
-            <p className="StoryChainNote">{t('write.removed')}</p>
-          ) : (
-            round.open && (
-              <Button className="Button Button--link" icon="fas fa-rotate-left" onclick={() => this.withdraw(mine)}>
-                {t('write.withdraw')}
-              </Button>
-            )
-          )}
-        </div>
-      );
-    }
-
-    if (round.write === 'guest') {
-      return (
-        <div className="StoryChainNote StoryChainNote--box">
-          <Button className="Button Button--primary" onclick={() => app.modal.show(() => import('flarum/forum/components/LogInModal'))}>
-            {app.translator.trans('core.forum.header.log_in_link')}
-          </Button>
-          <span>{t('write.guest')}</span>
-        </div>
-      );
-    }
-    if (round.write === 'repeat' || round.write === 'permission') {
-      return <p className="StoryChainNote StoryChainNote--box">{t(`write.${round.write}`)}</p>;
-    }
-    if (round.write !== null) return null;
-
-    const last = [...data.lines].reverse().find((line) => !line.hidden);
-    const length = this.draft.trim().length;
-
-    return (
-      <form className="StoryChainWrite" onsubmit={(e: SubmitEvent) => this.offer(e)}>
-        <label className="StoryChainWrite-label" for="sc-line">
-          {t('write.heading')}
-        </label>
-        {last && (
-          <p className="StoryChainWrite-context">
-            <span>{t('story.so_far')}</span> <q>{last.body}</q>
-          </p>
-        )}
-        <textarea
-          id="sc-line"
-          className="FormControl StoryChain-serif"
-          rows={3}
-          maxlength={story.maxLength}
-          placeholder={extractText(t('write.placeholder'))}
-          value={this.draft}
-          oninput={(e: InputEvent) => (this.draft = (e.target as HTMLTextAreaElement).value.replace(/\s*\n\s*/g, ' '))}
-        />
-        <div className="StoryChainWrite-foot">
-          <span className={classList('StoryChainCounter', { 'StoryChainCounter--near': length > story.maxLength * 0.9 })}>
-            {length} / {story.maxLength}
-          </span>
-          <Button type="submit" className="Button Button--primary" icon="fas fa-feather-pointed" loading={this.sending} disabled={length < 2}>
-            {t('write.submit')}
-          </Button>
-        </div>
-      </form>
-    );
-  }
-
-  candidates(round: Round): Mithril.Children {
-    const story = this.data!.story;
-    const shown = round.candidates.filter((c) => !c.mine);
-    const most = Math.max(1, ...round.candidates.map((c) => c.votes || 0));
-
-    return (
-      <div className="StoryChainRunning">
-        <div className="StoryChainRunning-head">
-          <h3>{t('vote.heading', { count: round.offered })}</h3>
-          <span className="StoryChainNote">
-            {round.live ? t('vote.live_note') : t('vote.hidden_note')}
-            {round.voters > 0 && !round.live && <> · {t('vote.voters', { count: round.voters })}</>}
-          </span>
-        </div>
-        {!round.candidates.length && <p className="StoryChainEmpty">{t('vote.empty')}</p>}
-        <ol className="StoryChainRunning-list">
-          {round.candidates.map((c) => {
-            const voted = round.myVote === c.id;
-            return (
-              <li
-                className={classList('StoryChainCandidate', {
-                  'StoryChainCandidate--voted': voted,
-                  'StoryChainCandidate--mine': c.mine,
-                  'StoryChainCandidate--removed': c.hidden,
-                })}
-              >
-                <p className="StoryChainCandidate-body">{c.body}</p>
-                {round.live && c.votes !== undefined && (
-                  <div className="StoryChainCandidate-bar" aria-hidden="true">
-                    <span style={{ width: `${(100 * (c.votes || 0)) / most}%` }} />
-                  </div>
-                )}
-                {(c.user || round.live || c.hidden || c.mine || story.canModerate || (round.canVote && round.open)) && (
-                  <div className="StoryChainCandidate-foot">
-                    {c.user ? Person({ id: c.user }) : <span />}
-                    <span className="StoryChainCandidate-actions">
-                      {round.live && c.votes !== undefined && (
-                        <span className="StoryChainCandidate-votes">{t('vote.count', { count: c.votes })}</span>
-                      )}
-                      {c.hidden && <span className="StoryChainBadge StoryChainBadge--muted">{t('vote.removed')}</span>}
-                      {c.mine && !c.hidden && <span className="StoryChainBadge StoryChainBadge--muted">{t('vote.own')}</span>}
-                      {story.canModerate && round.open && (
-                        <Button
-                          className="Button Button--link"
-                          icon={c.hidden ? 'fas fa-rotate-left' : 'fas fa-eye-slash'}
-                          onclick={() => this.moderate(c)}
-                        >
-                          {c.hidden ? t('manage.restore_line') : t('manage.remove_line')}
-                        </Button>
-                      )}
-                      {round.canVote && round.open && !c.mine && !c.hidden && (
-                        <Button
-                          className={classList('Button', 'StoryChainVote', voted && 'Button--primary')}
-                          icon={voted ? 'fas fa-check' : 'far fa-heart'}
-                          loading={this.voting === c.id}
-                          aria-pressed={voted ? 'true' : 'false'}
-                          onclick={() => this.vote(voted ? null : c.id, c.id)}
-                        >
-                          {voted ? t('vote.voted') : t('vote.vote')}
-                        </Button>
-                      )}
-                    </span>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-        {shown.length > 1 && <p className="StoryChainNote StoryChainRunning-ties">{t('vote.ties')}</p>}
-      </div>
-    );
-  }
-
   ending(): Mithril.Children {
     const story = this.data!.story;
     const days = Math.max(1, Math.round((Date.parse(story.finishedAt || story.createdAt) - Date.parse(story.createdAt)) / 86400000));
@@ -568,58 +376,6 @@ export default class StoryPage extends Page {
           })}
         </ul>
       </section>
-    );
-  }
-
-  offer(e: SubmitEvent) {
-    e.preventDefault();
-    const story = this.data!.story;
-    this.sending = true;
-    call('POST', `/${story.id}/lines`, { body: this.draft })
-      .then(() => {
-        this.draft = '';
-        app.alerts.show({ type: 'success' }, t('write.thanks'));
-        this.load();
-      })
-      .catch(() => this.load(true))
-      .finally(() => {
-        this.sending = false;
-        m.redraw();
-      });
-  }
-
-  withdraw(candidate: Candidate) {
-    call('DELETE', `/candidates/${candidate.id}`)
-      .then(() => {
-        this.draft = candidate.body;
-        this.load();
-      })
-      .catch(() => this.load(true));
-  }
-
-  vote(candidate: number | null, pressed: number) {
-    const story = this.data!.story;
-    const round = this.data!.round!;
-    const before = round.myVote;
-    round.myVote = candidate;
-    this.voting = pressed;
-    call('POST', `/${story.id}/vote`, { candidate })
-      .then(() => round.live && this.load(true))
-      .catch(() => {
-        round.myVote = before;
-        this.load(true);
-      })
-      .finally(() => {
-        this.voting = null;
-        m.redraw();
-      });
-  }
-
-  moderate(candidate: Candidate) {
-    // call() shows what went wrong; either way the round reloads as it is now.
-    call('POST', `/candidates/${candidate.id}`, { hidden: !candidate.hidden }).then(
-      () => this.load(),
-      () => this.load(true)
     );
   }
 }

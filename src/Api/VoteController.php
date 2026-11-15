@@ -9,6 +9,7 @@ use ErnestDefoe\StoryChain\Story;
 use ErnestDefoe\StoryChain\StoryLock;
 use ErnestDefoe\StoryChain\Vote;
 use Flarum\Http\RequestUtil;
+use Flarum\User\User;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\QueryException;
 use Laminas\Diactoros\Response\JsonResponse;
@@ -65,23 +66,29 @@ class VoteController implements RequestHandlerInterface
             Vote::query()->where('story_id', $story->id)->where('round', $story->round)->where('user_id', $actor->id)->delete();
 
             if ($candidate) {
-                $vote = new Vote();
-                $vote->story_id = $story->id;
-                $vote->round = $story->round;
-                $vote->candidate_id = $candidate->id;
-                $vote->user_id = $actor->id;
-                $vote->created_at = Carbon::now();
-                try {
-                    $this->db->transaction(fn () => $vote->save());
-                } catch (QueryException $e) {
-                    // Two taps at once: the other one's vote stands.
-                    if (! self::isDuplicate($e)) {
-                        throw $e;
-                    }
-                }
+                $this->place($story, $candidate, $actor);
             }
 
             return new JsonResponse(['vote' => $candidate?->id]);
         }));
+    }
+
+    private function place(Story $story, Candidate $candidate, User $actor): void
+    {
+        $vote = new Vote();
+        $vote->story_id = $story->id;
+        $vote->round = $story->round;
+        $vote->candidate_id = $candidate->id;
+        $vote->user_id = $actor->id;
+        $vote->created_at = Carbon::now();
+        try {
+            // A savepoint, so a double tap's duplicate doesn't poison the outer transaction (PostgreSQL).
+            $this->db->transaction(fn () => $vote->save());
+        } catch (QueryException $e) {
+            // Two taps at once: the other one's vote stands.
+            if (! self::isDuplicate($e)) {
+                throw $e;
+            }
+        }
     }
 }
